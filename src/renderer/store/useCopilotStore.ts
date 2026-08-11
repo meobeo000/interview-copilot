@@ -60,7 +60,10 @@ function createAudioCapture(): AudioCapture {
   return new MockAudioCapture();
 }
 
-function createTranscriptService(): TranscriptionService & { sendAudio?: (frame: AudioFrame) => void } {
+function createTranscriptService(): TranscriptionService & {
+  sendAudio?: (frame: AudioFrame) => void;
+  resetTurn?: () => void;
+} {
   if (typeof import.meta !== "undefined" && import.meta.env?.VITE_USE_MOCK_STT === "true") {
     return new MockTranscriptService();
   }
@@ -92,9 +95,85 @@ const answerService = new MockAnswerService();
 const audioCapture = createAudioCapture();
 const smartDetector = new SmartQuestionDetector();
 
-let activeTranscriptService: (TranscriptionService & { sendAudio?: (frame: AudioFrame) => void }) | undefined;
+let activeTranscriptService:
+  | (TranscriptionService & { sendAudio?: (frame: AudioFrame) => void; resetTurn?: () => void })
+  | undefined;
 let transcriptController: StreamController | undefined;
 let activeItem: ConversationItem | undefined;
+
+function handleTranscriptUpdate(
+  text: string,
+  set: (partial: Partial<CopilotState>) => void,
+  get: () => CopilotState
+) {
+  const currentStatus = get().status;
+
+  if (currentStatus === "PossibleEnd") {
+    set({ status: "Listening", liveTranscript: text });
+  } else {
+    set({ liveTranscript: text });
+  }
+
+  // While answering or finalizing, accumulate speech for next turn without triggering turn detection
+  if (currentStatus === "Answering" || currentStatus === "FinalizingQuestion") {
+    return;
+  }
+
+  smartDetector.updateTranscript(
+    text,
+    () => {
+      if (get().status === "Listening") {
+        set({ status: "PossibleEnd" });
+      }
+    },
+    (candidate) => {
+      finalizeTurn(candidate.text, set, get);
+    }
+  );
+}
+
+function finalizeTurn(
+  questionText: string,
+  set: (partial: Partial<CopilotState>) => void,
+  get: () => CopilotState
+) {
+  const text = questionText.trim();
+  if (!text || get().status === "FinalizingQuestion" || get().status === "Answering") {
+    return;
+  }
+
+  // 1. Reset detector timers
+  smartDetector.reset();
+
+  // 2. Clear current turn buffer on STT service while leaving connection open
+  if (typeof activeTranscriptService?.resetTurn === "function") {
+    activeTranscriptService.resetTurn();
+  }
+
+  // 3. Clear liveTranscript for the new turn
+  set({
+    status: "FinalizingQuestion",
+    liveTranscript: ""
+  });
+
+  // 4. Create new conversation item for this turn
+  const newItem: ConversationItem = {
+    id: crypto.randomUUID(),
+    startedAt: Date.now(),
+    rawTranscript: text,
+    cleanedQuestion: text,
+    detectedTopic: "Vietnamese SEO Question"
+  };
+  activeItem = newItem;
+
+  // 5. Stream answer for finalized question
+  void streamAnswerForItem(newItem, set, get).catch((error: unknown) => {
+    set({
+      status: "Error",
+      error: error instanceof Error ? error.message : "Answer stream failed."
+    });
+  });
+}
 
 async function streamAnswerForItem(
   item: ConversationItem,
@@ -138,8 +217,14 @@ async function streamAnswerForItem(
   const history = capHistory(nextHistory);
   writeHistory(history);
 
-  // After answer streaming completes, return to background Listening state
+  // Transition back to Listening state
   set({ status: "Listening", history });
+
+  // Evaluate any speech collected during answer streaming for the next turn
+  const accumulatedTurnSpeech = get().liveTranscript.trim();
+  if (accumulatedTurnSpeech) {
+    handleTranscriptUpdate(accumulatedTurnSpeech, set, get);
+  }
 }
 
 export const useCopilotStore = create<CopilotState>((set, get) => ({
@@ -202,50 +287,9 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
         });
       });
 
-    const handleTranscriptUpdate = (text: string) => {
-      const currentStatus = get().status;
-      // Speech resumed: if candidate end was active, reset to Listening
-      if (currentStatus === "PossibleEnd") {
-        set({ status: "Listening", liveTranscript: text });
-      } else {
-        set({ liveTranscript: text });
-      }
-
-      smartDetector.updateTranscript(
-        text,
-        () => {
-          if (get().status === "Listening") {
-            set({ status: "PossibleEnd" });
-          }
-        },
-        (candidate) => {
-          const currentText = candidate.text.trim();
-          if (!currentText || get().status === "FinalizingQuestion" || get().status === "Answering") {
-            return;
-          }
-
-          set({ status: "FinalizingQuestion" });
-          const newItem: ConversationItem = {
-            id: crypto.randomUUID(),
-            startedAt: Date.now(),
-            rawTranscript: currentText,
-            cleanedQuestion: currentText,
-            detectedTopic: "Vietnamese SEO Question"
-          };
-          activeItem = newItem;
-          void streamAnswerForItem(newItem, set, get).catch((error: unknown) => {
-            set({
-              status: "Error",
-              error: error instanceof Error ? error.message : "Answer stream failed."
-            });
-          });
-        }
-      );
-    };
-
     transcriptController = activeTranscriptService.start({
-      onPartial: (chunk) => handleTranscriptUpdate(chunk.text),
-      onFinal: (chunk) => handleTranscriptUpdate(chunk.text),
+      onPartial: (chunk) => handleTranscriptUpdate(chunk.text, set, get),
+      onFinal: (chunk) => handleTranscriptUpdate(chunk.text, set, get),
       onError: (error) => {
         void audioCapture.stop();
         set({ status: "Error", audioLevel: 0, error: error.message });
@@ -269,29 +313,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     set({ status: "Idle", audioLevel: 0 });
   },
   finalizeQuestionNow: () => {
-    const text = get().liveTranscript.trim();
-    if (!text || get().status === "FinalizingQuestion" || get().status === "Answering") {
-      return;
-    }
-
-    smartDetector.reset();
-    set({ status: "FinalizingQuestion" });
-
-    const newItem: ConversationItem = {
-      id: crypto.randomUUID(),
-      startedAt: Date.now(),
-      rawTranscript: text,
-      cleanedQuestion: text,
-      detectedTopic: "Manual Finalized Question"
-    };
-    activeItem = newItem;
-
-    void streamAnswerForItem(newItem, set, get).catch((error: unknown) => {
-      set({
-        status: "Error",
-        error: error instanceof Error ? error.message : "Answer stream failed."
-      });
-    });
+    finalizeTurn(get().liveTranscript, set, get);
   },
   toggleHistoryDrawer: () => set((state) => ({ isHistoryOpen: !state.isHistoryOpen })),
   setHistoryOpen: (open: boolean) => set({ isHistoryOpen: open }),

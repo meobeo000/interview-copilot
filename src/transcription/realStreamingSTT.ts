@@ -74,6 +74,12 @@ export class RealStreamingSTTService implements TranscriptionService {
     };
   }
 
+  resetTurn(): void {
+    this.accumulatedFinal = "";
+    this.currentPartial = "";
+    this.startedAt = Date.now();
+  }
+
   sendAudio(frame: AudioFrame): void {
     if (!this.active) {
       return;

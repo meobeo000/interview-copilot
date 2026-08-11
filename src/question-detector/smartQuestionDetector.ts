@@ -4,13 +4,72 @@ export interface QuestionCandidate {
   reason?: string;
 }
 
+const incompleteEndings = [
+  "nếu",
+  "và",
+  "hoặc",
+  "nhưng",
+  "vì",
+  "nên",
+  "là",
+  "rằng",
+  "thì",
+  "cho",
+  "với",
+  "bởi",
+  "do",
+  "như",
+  "mà",
+  "khi",
+  "đang",
+  "sẽ",
+  "cần",
+  "muốn"
+];
+
+const incompletePhrases = [
+  "theo em nếu",
+  "ví dụ bên anh",
+  "trường hợp",
+  "giả sử",
+  "nếu website đang",
+  "và trường hợp"
+];
+
+export function isIncompleteEnding(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return true;
+  }
+
+  const words = trimmed
+    .replace(/[.,?!:;]+$/g, "")
+    .trim()
+    .toLowerCase()
+    .split(/\s+/);
+
+  if (words.length < 5) {
+    return true;
+  }
+
+  const lastWord = words[words.length - 1];
+  if (incompleteEndings.includes(lastWord)) {
+    return true;
+  }
+
+  if (incompletePhrases.some((phrase) => trimmed.toLowerCase().endsWith(phrase))) {
+    return true;
+  }
+
+  return false;
+}
+
 export function isVietnameseSentenceComplete(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) {
     return false;
   }
 
-  // Clean trailing punctuation for word inspection
   const words = trimmed
     .replace(/[.,?!:;]+$/g, "")
     .trim()
@@ -30,44 +89,7 @@ export function isVietnameseSentenceComplete(text: string): boolean {
     return true;
   }
 
-  // Incomplete trailing words / conjunctions / incomplete clause indicators
-  const incompleteEndings = [
-    "nếu",
-    "và",
-    "hoặc",
-    "nhưng",
-    "vì",
-    "nên",
-    "là",
-    "rằng",
-    "thì",
-    "cho",
-    "với",
-    "bởi",
-    "do",
-    "như",
-    "mà",
-    "khi",
-    "đang",
-    "sẽ",
-    "cần",
-    "muốn"
-  ];
-
-  const incompletePhrases = [
-    "theo em nếu",
-    "ví dụ bên anh",
-    "trường hợp",
-    "giả sử",
-    "nếu website đang",
-    "và trường hợp"
-  ];
-
-  if (incompleteEndings.includes(lastWord)) {
-    return false;
-  }
-
-  if (incompletePhrases.some((phrase) => trimmed.toLowerCase().endsWith(phrase))) {
+  if (isIncompleteEnding(trimmed)) {
     return false;
   }
 
@@ -145,11 +167,16 @@ export class SmartQuestionDetector {
 
     // Timer 2: Hard Timeout (~2800ms silence fallback)
     this.hardTimeoutTimer = window.setTimeout(() => {
-      if (this.currentText.trim().length > 0) {
+      const textToTest = this.currentText.trim();
+      const isComplete = isVietnameseSentenceComplete(textToTest);
+      const isExplicitlyIncomplete = isIncompleteEnding(textToTest);
+
+      // Do NOT finalize if text is explicitly incomplete (conjunction or <5 words)
+      if (textToTest.length > 0 && !isExplicitlyIncomplete) {
         onFinalize({
-          text: this.currentText,
-          isComplete: isVietnameseSentenceComplete(this.currentText),
-          reason: "Hard timeout silence threshold reached."
+          text: textToTest,
+          isComplete,
+          reason: "Hard timeout silence threshold reached for usable content."
         });
       }
       this.clearTimers();

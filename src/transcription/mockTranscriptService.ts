@@ -77,4 +77,6 @@ export class MockTranscriptService implements TranscriptionService {
       }
     };
   }
+
+  resetTurn(): void {}
 }

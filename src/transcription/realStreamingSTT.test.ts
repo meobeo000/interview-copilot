@@ -78,4 +78,44 @@ describe("RealStreamingSTTService", () => {
     controller.stop();
     expect(stopSession).toHaveBeenCalled();
   });
+
+  it("resets accumulated transcript buffer when resetTurn() is called without stopping session", () => {
+    let finalListener: ((text: string) => void) | undefined;
+
+    window.copilotWindow = {
+      hide: vi.fn(),
+      getDesktopSourceId: vi.fn(),
+      stt: {
+        startSession: vi.fn().mockResolvedValue(undefined),
+        sendAudioFrame: vi.fn(),
+        stopSession: vi.fn().mockResolvedValue(undefined),
+        getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
+        onPartial: () => () => {},
+        onFinal: (cb) => {
+          finalListener = cb;
+          return () => {};
+        },
+        onError: () => () => {}
+      }
+    };
+
+    const service = new RealStreamingSTTService();
+    const onFinal = vi.fn();
+
+    service.start({
+      onPartial: () => {},
+      onFinal,
+      onError: () => {},
+      onComplete: () => {}
+    });
+
+    finalListener?.("Question 1 speech");
+    expect(onFinal).toHaveBeenLastCalledWith(expect.objectContaining({ text: "Question 1 speech" }));
+
+    // Reset turn boundary
+    service.resetTurn();
+
+    finalListener?.("Question 2 speech");
+    expect(onFinal).toHaveBeenLastCalledWith(expect.objectContaining({ text: "Question 2 speech" }));
+  });
 });
