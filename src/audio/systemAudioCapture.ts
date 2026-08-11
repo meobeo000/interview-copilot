@@ -1,4 +1,7 @@
+import { resampleMono } from "./resampler";
 import type { AudioCapture, AudioFrame } from "./types";
+
+export const TARGET_SAMPLE_RATE = 16000;
 
 export class SystemAudioCapture implements AudioCapture {
   private mediaStream: MediaStream | undefined;
@@ -8,16 +11,28 @@ export class SystemAudioCapture implements AudioCapture {
   private currentRms = 0;
   private active = false;
 
-  async start(onFrame: (frame: AudioFrame) => void): Promise<void> {
+  async start(onFrame: (frame: AudioFrame) => void, onError?: (error: Error) => void): Promise<void> {
     await this.stop();
 
     if (typeof window.copilotWindow?.getDesktopSourceId !== "function" || !navigator.mediaDevices?.getUserMedia) {
-      throw new Error("Windows system audio capture is not supported in this environment.");
+      const err = new Error("Windows system audio capture is not supported in this environment.");
+      onError?.(err);
+      throw err;
     }
 
-    const sourceId = await window.copilotWindow.getDesktopSourceId();
+    let sourceId: string | undefined;
+    try {
+      sourceId = await window.copilotWindow.getDesktopSourceId();
+    } catch (cause) {
+      const err = new Error(`Failed to acquire desktop source ID: ${cause instanceof Error ? cause.message : String(cause)}`);
+      onError?.(err);
+      throw err;
+    }
+
     if (!sourceId) {
-      throw new Error("No desktop screen source available for system audio capture.");
+      const err = new Error("No desktop screen source available for system audio capture.");
+      onError?.(err);
+      throw err;
     }
 
     const constraints = {
@@ -39,7 +54,15 @@ export class SystemAudioCapture implements AudioCapture {
       } as unknown as MediaTrackConstraints
     };
 
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (cause) {
+      const err = new Error(`Windows system audio capture permission/stream failure: ${cause instanceof Error ? cause.message : String(cause)}`);
+      onError?.(err);
+      throw err;
+    }
+
     this.mediaStream = stream;
 
     // Release temporary video tracks immediately so we only retain system output audio
@@ -47,8 +70,19 @@ export class SystemAudioCapture implements AudioCapture {
 
     const audioTracks = stream.getAudioTracks();
     if (audioTracks.length === 0) {
-      throw new Error("No system audio track captured from Windows desktop source.");
+      const err = new Error("No system audio track captured from Windows desktop source.");
+      onError?.(err);
+      throw err;
     }
+
+    const primaryAudioTrack = audioTracks[0];
+    primaryAudioTrack.onended = () => {
+      if (this.active) {
+        this.currentRms = 0;
+        this.active = false;
+        onError?.(new Error("Windows system audio track disconnected or ended. Please click Listen to restart capture."));
+      }
+    };
 
     const audioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const audioContext = new audioContextClass();
@@ -62,7 +96,7 @@ export class SystemAudioCapture implements AudioCapture {
     this.processorNode = processorNode;
 
     sourceNode.connect(processorNode);
-    // Connect to destination node to keep processor active without producing output echo
+    // Connect to destination to keep node active in event loop without audio feedback loop
     processorNode.connect(audioContext.destination);
 
     this.active = true;
@@ -74,7 +108,7 @@ export class SystemAudioCapture implements AudioCapture {
 
       const inputBuffer = event.inputBuffer;
       const channelData = inputBuffer.getChannelData(0);
-      const sampleRate = inputBuffer.sampleRate;
+      const inputRate = inputBuffer.sampleRate;
 
       let sumSq = 0;
       for (let i = 0; i < channelData.length; i++) {
@@ -84,12 +118,13 @@ export class SystemAudioCapture implements AudioCapture {
       const rmsLevel = Math.min(1, Math.max(0, Math.pow(rawRms * 4.5, 0.75)));
       this.currentRms = rmsLevel;
 
-      const pcmCopy = new Float32Array(channelData);
-      const durationMs = Math.round((channelData.length / sampleRate) * 1000);
+      // Resample mono float32 channel data down to strict 16,000 Hz target rate
+      const resampledData = resampleMono(channelData, inputRate, TARGET_SAMPLE_RATE);
+      const durationMs = Math.round((resampledData.length / TARGET_SAMPLE_RATE) * 1000);
 
       onFrame({
-        data: pcmCopy,
-        sampleRate,
+        data: resampledData,
+        sampleRate: TARGET_SAMPLE_RATE,
         channels: 1,
         sampleFormat: "float32",
         durationMs,
@@ -115,7 +150,10 @@ export class SystemAudioCapture implements AudioCapture {
     }
 
     if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach((track) => track.stop());
+      this.mediaStream.getTracks().forEach((track) => {
+        track.onended = null;
+        track.stop();
+      });
       this.mediaStream = undefined;
     }
 

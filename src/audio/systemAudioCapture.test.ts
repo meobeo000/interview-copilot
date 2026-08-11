@@ -5,10 +5,14 @@ import { SystemAudioCapture } from "./systemAudioCapture";
 describe("AudioCapture subsystem", () => {
   it("SystemAudioCapture throws descriptive error when window.copilotWindow is absent", async () => {
     const capture = new SystemAudioCapture();
-    await expect(capture.start(() => {})).rejects.toThrow("Windows system audio capture is not supported in this environment.");
+    const errorHandler = vi.fn();
+    await expect(capture.start(() => {}, errorHandler)).rejects.toThrow(
+      "Windows system audio capture is not supported in this environment."
+    );
+    expect(errorHandler).toHaveBeenCalled();
   });
 
-  it("MockAudioCapture starts, emits valid frames with RMS level, and stops cleanly", async () => {
+  it("MockAudioCapture starts, emits valid 16kHz frames with RMS level, and stops cleanly", async () => {
     const mockCapture = new MockAudioCapture();
     const frameHandler = vi.fn();
 
@@ -25,6 +29,18 @@ describe("AudioCapture subsystem", () => {
     expect(frame.rmsLevel).toBeGreaterThanOrEqual(0);
 
     await mockCapture.stop();
+    expect(mockCapture.getAudioLevel()).toBe(0);
+  });
+
+  it("handles repeated start() and stop() calls idempotently without leaking state", async () => {
+    const mockCapture = new MockAudioCapture();
+    const handler = vi.fn();
+
+    await mockCapture.start(handler);
+    await mockCapture.start(handler);
+    await mockCapture.stop();
+    await mockCapture.stop();
+
     expect(mockCapture.getAudioLevel()).toBe(0);
   });
 });

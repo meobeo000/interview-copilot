@@ -151,11 +151,28 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     });
 
     void audioCapture
-      .start((frame) => {
-        set({ audioLevel: frame.rmsLevel });
-      })
+      .start(
+        (frame) => {
+          set({ audioLevel: frame.rmsLevel });
+        },
+        (err) => {
+          transcriptController?.stop();
+          transcriptController = undefined;
+          set({
+            status: "Error",
+            audioLevel: 0,
+            error: `Audio stream error: ${err.message}`
+          });
+        }
+      )
       .catch((err: unknown) => {
-        console.warn("System audio capture fallback or error:", err);
+        transcriptController?.stop();
+        transcriptController = undefined;
+        set({
+          status: "Error",
+          audioLevel: 0,
+          error: `Audio capture failed: ${err instanceof Error ? err.message : String(err)}`
+        });
       });
 
     transcriptController = transcriptService.start({

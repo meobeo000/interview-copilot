@@ -12,10 +12,14 @@ export function AudioMeter({ level, active, error }: AudioMeterProps) {
   }
 
   const bars = [0.35, 0.65, 0.85, 1.0];
+  const isSoundActive = level > 0.02;
 
   return (
-    <div className="audio-meter" title={error ?? `System audio level: ${Math.round(level * 100)}%`}>
-      {level > 0.02 ? <Volume2 size={15} className="meter-icon active" /> : <VolumeX size={15} className="meter-icon" />}
+    <div
+      className={`audio-meter ${isSoundActive ? "has-sound" : "is-silent"}`}
+      title={error ?? (isSoundActive ? `System audio active: ${Math.round(level * 100)}%` : "Capture active (Waiting for system audio)")}
+    >
+      {isSoundActive ? <Volume2 size={15} className="meter-icon active" /> : <VolumeX size={15} className="meter-icon silent" />}
       <div className="meter-bars">
         {bars.map((threshold, idx) => {
           const isLit = level >= threshold * 0.2;
@@ -29,6 +33,7 @@ export function AudioMeter({ level, active, error }: AudioMeterProps) {
           );
         })}
       </div>
+      {!isSoundActive ? <span className="silent-label">Silent</span> : null}
     </div>
   );
 }

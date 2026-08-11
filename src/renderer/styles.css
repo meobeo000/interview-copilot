@@ -178,6 +178,14 @@ button {
   background: #25a889;
 }
 
+.silent-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(238, 245, 242, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .panel {
   min-height: 0;
   overflow: auto;
