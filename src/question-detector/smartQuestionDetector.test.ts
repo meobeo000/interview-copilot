@@ -6,38 +6,51 @@ import {
   SmartQuestionDetector
 } from "./smartQuestionDetector";
 
-describe("Vietnamese question intent & setup fragment heuristics", () => {
-  it("classifies setup context fragments correctly", () => {
-    expect(isSetupFragment("Anh hỏi sâu hơn chút")).toBe(true);
-    expect(isSetupFragment("Giả sử index canonical robots đều bình thường")).toBe(true);
-    expect(isSetupFragment("Impressions chỉ giảm 5% nhưng click giảm 40%")).toBe(true);
-    expect(isSetupFragment("Vị trí trung bình từ 3.2 xuống 6.8")).toBe(true);
-    expect(isSetupFragment("Đối thủ chính lại tăng")).toBe(true);
-    expect(isSetupFragment("Theo em nếu website")).toBe(true);
+describe("Refined Vietnamese question intent detection", () => {
+  const positiveQuestionExamples = [
+    "Dự án gần nhất em làm top là con nào",
+    "Site mở bot rồi không có tín hiệu thì em làm sao",
+    "Anh cho em budget 20 triệu thì em chia kiểu gì",
+    "Em chọn domain nào",
+    "Em làm bước nào trước",
+    "Nếu cách đó không hiệu quả thì em xử lý ra sao",
+    "Em sẽ bắt đầu ở đâu",
+    "Bao lâu thì em biết strategy đó hiệu quả",
+    "Khi nào em quyết định 301",
+    "Có nên disavow ngay không",
+    "Có cần thay domain không",
+    "Cách nào em dùng để kiểm tra",
+    "Anh đưa 20 domain thì em chọn cái nào",
+    "Nếu domain DR 50 nhưng traffic bằng 0 thì sao"
+  ];
+
+  const negativeSetupExamples = [
+    "Dự án gần nhất em làm top",
+    "Anh cho em budget 20 triệu",
+    "Site mở bot rồi không có tín hiệu",
+    "Nếu cách đó không hiệu quả",
+    "Anh đưa em 20 domain",
+    "Vị trí trung bình giảm từ 3 xuống 6",
+    "Đối thủ chính đang tăng"
+  ];
+
+  positiveQuestionExamples.forEach((text) => {
+    it(`detects positive question: "${text}"`, () => {
+      expect(hasQuestionIntent(text)).toBe(true);
+      expect(isVietnameseSentenceComplete(text)).toBe(true);
+    });
   });
 
-  it("detects valid Vietnamese question intents and request prefixes", () => {
-    expect(hasQuestionIntent("Em ưu tiên kiểm tra gì tiếp theo và vì sao?")).toBe(true);
-    expect(hasQuestionIntent("Trong trường hợp đó em sẽ xử lý như thế nào?")).toBe(true);
-    expect(hasQuestionIntent("Tại sao em lại chọn phương án đó?")).toBe(true);
-    expect(hasQuestionIntent("Em sẽ kiểm tra cái gì trước?")).toBe(true);
-    expect(hasQuestionIntent("Cho anh biết quy trình đánh giá audit site")).toBe(true);
-    expect(hasQuestionIntent("Em giải thích cách xử lý disavow")).toBe(true);
-    expect(hasQuestionIntent("Tại sao?")).toBe(true);
-    expect(hasQuestionIntent("Vì sao?")).toBe(true);
-  });
-
-  it("requires both absence of setup fragment and presence of question intent for complete sentence", () => {
-    expect(isVietnameseSentenceComplete("Anh hỏi sâu hơn chút")).toBe(false);
-    expect(
-      isVietnameseSentenceComplete(
-        "Giả sử index canonical robots đều bình thường, em ưu tiên kiểm tra gì tiếp theo và vì sao?"
-      )
-    ).toBe(true);
+  negativeSetupExamples.forEach((text) => {
+    it(`rejects negative setup: "${text}"`, () => {
+      expect(hasQuestionIntent(text)).toBe(false);
+      expect(isSetupFragment(text)).toBe(true);
+      expect(isVietnameseSentenceComplete(text)).toBe(false);
+    });
   });
 });
 
-describe("SmartQuestionDetector multi-segment turn accumulation", () => {
+describe("SmartQuestionDetector turn evaluation", () => {
   let detector: SmartQuestionDetector;
 
   beforeEach(() => {
@@ -50,35 +63,40 @@ describe("SmartQuestionDetector multi-segment turn accumulation", () => {
     vi.useRealTimers();
   });
 
-  it("accumulates multi-segment speech into one fullTurn without prematurely finalizing setup fragments", () => {
+  it("finalizes positive question at candidate pause (~1200ms)", () => {
     const onPossibleEnd = vi.fn();
     const onFinalize = vi.fn();
 
-    // Segment 1
-    const t1 = detector.appendSegment("Anh hỏi sâu hơn chút");
-    detector.updateTurn(t1, onPossibleEnd, onFinalize);
-    vi.advanceTimersByTime(1200);
+    detector.updateTurn(
+      "Dự án gần nhất em làm top là con nào",
+      onPossibleEnd,
+      onFinalize
+    );
 
-    expect(onPossibleEnd).toHaveBeenCalled();
-    expect(onFinalize).not.toHaveBeenCalled(); // Setup fragment, do NOT finalize!
-
-    // Segment 2
-    const t2 = detector.appendSegment("Giả sử index canonical robots đều bình thường");
-    detector.updateTurn(t2, onPossibleEnd, onFinalize);
-    vi.advanceTimersByTime(1500);
-
-    expect(onFinalize).not.toHaveBeenCalled();
-
-    // Segment 3: Question prompt arrives
-    const t3 = detector.appendSegment("Em ưu tiên kiểm tra gì tiếp theo và vì sao?");
-    detector.updateTurn(t3, onPossibleEnd, onFinalize);
     vi.advanceTimersByTime(1300);
 
+    expect(onPossibleEnd).toHaveBeenCalled();
     expect(onFinalize).toHaveBeenCalledWith(
       expect.objectContaining({
         isComplete: true,
-        text: "Anh hỏi sâu hơn chút, Giả sử index canonical robots đều bình thường, Em ưu tiên kiểm tra gì tiếp theo và vì sao?"
+        text: "Dự án gần nhất em làm top là con nào"
       })
     );
+  });
+
+  it("does NOT finalize setup statement even after hard timeout (~2800ms)", () => {
+    const onPossibleEnd = vi.fn();
+    const onFinalize = vi.fn();
+
+    detector.updateTurn(
+      "Site mở bot rồi không có tín hiệu",
+      onPossibleEnd,
+      onFinalize
+    );
+
+    vi.advanceTimersByTime(3000);
+
+    expect(onPossibleEnd).toHaveBeenCalled();
+    expect(onFinalize).not.toHaveBeenCalled();
   });
 });

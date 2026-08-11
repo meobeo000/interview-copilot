@@ -4,13 +4,6 @@ export interface QuestionCandidate {
   reason?: string;
 }
 
-export interface InterviewerTurn {
-  segments: string[];
-  fullText: string;
-  startedAt: number;
-  lastSpeechAt: number;
-}
-
 const incompleteConjunctions = [
   "nếu",
   "và",
@@ -34,57 +27,58 @@ const incompleteConjunctions = [
   "muốn"
 ];
 
-const setupPhrases = [
-  "anh hỏi sâu hơn chút",
-  "giả sử",
-  "trường hợp",
-  "nếu website",
-  "nếu cách đó",
-  "anh có một",
-  "đối thủ chính",
-  "vị trí trung bình",
-  "impressions chỉ giảm",
-  "click giảm",
-  "và trường hợp",
-  "ví dụ bên anh"
+const questionRegexPatterns: RegExp[] = [
+  // Starts with question trigger
+  /^(bao lâu|khi nào|có nên|có cần|có phải|cách nào|cách gì|tại sao|vì sao|làm sao|ở đâu)\b/i,
+
+  // Contains specific question phrase
+  /\b(bao lâu|khi nào|cách nào|cách gì)\b/i,
+  /\b(có nên|có cần|có phải)\b/i,
+
+  // Ends with question phrase/intent
+  /(thì sao|thế nào|như thế nào|ra sao|làm sao|kiểu gì|chia kiểu gì|ở đâu|là gì|tại sao|vì sao)$/i,
+
+  // Ends with question particle or interrogative pronoun
+  /(cái nào|con nào|bước nào|domain nào|cách nào|nào|gì|không|chưa|hả|à|ổn không|được không|đúng không)$/i,
+
+  // Verbal question structures
+  /\b(chọn|làm|bắt đầu|xử lý|chia|kiểm tra|dùng)\b.+\b(nào|gì|sao|đâu)\b/i,
+  /\b(mô tả|trình bày|cho anh biết|giải thích|phân tích)\b/i
 ];
 
-const questionIntentEndings = [
-  "là gì",
-  "tại sao",
-  "vì sao",
-  "như thế nào",
-  "thế nào",
-  "làm gì",
-  "kiểm tra gì",
-  "xử lý gì",
-  "xử lý thế nào",
-  "em sẽ làm gì",
-  "em nghĩ sao",
-  "ưu tiên cái gì",
-  "dựa vào đâu",
-  "bao lâu",
-  "thì sao",
-  "còn ... thì sao",
-  "không",
-  "chưa",
-  "hả",
-  "à",
-  "được không",
-  "đúng không",
-  "hợp lý không"
-];
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[.,?!:;]+$/g, "")
+    .replace(/(^|\s+)(ờ|ừm|hả)($|\s+)/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-const questionRequestPrefixes = [
-  "em mô tả",
-  "em trình bày",
-  "anh muốn em",
-  "cho anh biết",
-  "em giải thích",
-  "hãy phân tích",
-  "hãy chia sẻ",
-  "hãy giải thích"
-];
+export function hasQuestionIntent(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  // Explicit question mark at end
+  if (trimmed.endsWith("?")) {
+    return true;
+  }
+
+  const normalized = normalizeText(trimmed);
+  if (!normalized) {
+    return false;
+  }
+
+  for (const pattern of questionRegexPatterns) {
+    if (pattern.test(normalized)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 export function isSetupFragment(text: string): boolean {
   const trimmed = text.trim();
@@ -92,11 +86,8 @@ export function isSetupFragment(text: string): boolean {
     return true;
   }
 
-  const lower = trimmed.toLowerCase();
-  const words = lower
-    .replace(/[.,?!:;]+$/g, "")
-    .trim()
-    .split(/\s+/);
+  const normalized = normalizeText(trimmed);
+  const words = normalized.split(/\s+/);
 
   if (words.length < 3) {
     return true;
@@ -107,57 +98,8 @@ export function isSetupFragment(text: string): boolean {
     return true;
   }
 
-  // If text contains setup context and lacks question intent
-  const containsSetupContext = setupPhrases.some((phrase) => lower.includes(phrase));
-  if (containsSetupContext && !hasQuestionIntent(trimmed)) {
-    return true;
-  }
-
-  return false;
-}
-
-export function hasQuestionIntent(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return false;
-  }
-
-  const lower = trimmed.toLowerCase();
-
-  // Explicit question mark at the end
-  if (trimmed.endsWith("?")) {
-    return true;
-  }
-
-  // Check request / imperative question prefixes
-  for (const prefix of questionRequestPrefixes) {
-    if (lower.includes(prefix)) {
-      return true;
-    }
-  }
-
-  // Check ending question intent particles / phrases
-  const words = lower
-    .replace(/[.,?!:;]+$/g, "")
-    .trim()
-    .split(/\s+/);
-
-  const lastWord = words[words.length - 1];
-  const lastTwoWords = words.slice(-2).join(" ");
-  const lastThreeWords = words.slice(-3).join(" ");
-
-  for (const ending of questionIntentEndings) {
-    if (
-      lastWord === ending ||
-      lastTwoWords === ending ||
-      lastThreeWords === ending ||
-      lower.endsWith(" " + ending)
-    ) {
-      return true;
-    }
-  }
-
-  return false;
+  // If text does not contain valid question intent, it is treated as an incomplete setup fragment
+  return !hasQuestionIntent(trimmed);
 }
 
 export function isVietnameseSentenceComplete(text: string): boolean {
@@ -170,36 +112,16 @@ export function isVietnameseSentenceComplete(text: string): boolean {
 export class SmartQuestionDetector {
   private candidateTimer: number | undefined;
   private hardTimeoutTimer: number | undefined;
-  private currentTurn: InterviewerTurn = {
-    segments: [],
-    fullText: "",
-    startedAt: Date.now(),
-    lastSpeechAt: Date.now()
-  };
 
   public CANDIDATE_PAUSE_MS = 1200; // ~800ms - 1800ms
   public HARD_TIMEOUT_MS = 2800; // ~1800ms - 3000ms
 
+  /**
+   * Deprecated / Internal helper for tests backward compatibility.
+   * Delegates directly to current turn text evaluation.
+   */
   appendSegment(segmentText: string): string {
-    const trimmed = segmentText.trim();
-    if (!trimmed) {
-      return this.currentTurn.fullText;
-    }
-
-    if (this.currentTurn.segments.length === 0) {
-      this.currentTurn.startedAt = Date.now();
-    }
-
-    // Append segment to turn buffer if not duplicate
-    if (!this.currentTurn.segments.includes(trimmed)) {
-      this.currentTurn.segments.push(trimmed);
-    }
-
-    // Full text combines all segments with natural punctuation / spacing
-    this.currentTurn.fullText = this.currentTurn.segments.join(", ");
-    this.currentTurn.lastSpeechAt = Date.now();
-
-    return this.currentTurn.fullText;
+    return segmentText.trim();
   }
 
   updateTurn(
@@ -212,20 +134,17 @@ export class SmartQuestionDetector {
       return;
     }
 
-    this.currentTurn.fullText = trimmed;
-    this.currentTurn.lastSpeechAt = Date.now();
-
-    // Reset timers when speech arrives
+    // Reset timers when new speech arrives
     this.clearTimers();
 
     // Timer 1: Candidate Pause (~1200ms)
     this.candidateTimer = window.setTimeout(() => {
       onPossibleEnd();
 
-      // Only candidate-finalize if turn contains explicit question intent
-      if (hasQuestionIntent(this.currentTurn.fullText) && !isSetupFragment(this.currentTurn.fullText)) {
+      // Only candidate-finalize if turn contains explicit question intent and is not an incomplete setup fragment
+      if (hasQuestionIntent(trimmed) && !isSetupFragment(trimmed)) {
         onFinalizeCandidate({
-          text: this.currentTurn.fullText,
+          text: trimmed,
           isComplete: true,
           reason: "Question intent detected at candidate pause."
         });
@@ -235,24 +154,19 @@ export class SmartQuestionDetector {
 
     // Timer 2: Hard Timeout (~2800ms)
     this.hardTimeoutTimer = window.setTimeout(() => {
-      const textToTest = this.currentTurn.fullText.trim();
-      const hasIntent = hasQuestionIntent(textToTest);
-      const setup = isSetupFragment(textToTest);
+      const hasIntent = hasQuestionIntent(trimmed);
+      const setup = isSetupFragment(trimmed);
 
       // Finalize ONLY IF turn contains question intent and is not an incomplete setup fragment
       if (hasIntent && !setup) {
         onFinalizeCandidate({
-          text: textToTest,
+          text: trimmed,
           isComplete: true,
           reason: "Hard timeout reached for complete question turn."
         });
       }
       this.clearTimers();
     }, this.HARD_TIMEOUT_MS);
-  }
-
-  getCurrentTurn(): InterviewerTurn {
-    return { ...this.currentTurn };
   }
 
   clearTimers(): void {
@@ -268,11 +182,5 @@ export class SmartQuestionDetector {
 
   reset(): void {
     this.clearTimers();
-    this.currentTurn = {
-      segments: [],
-      fullText: "",
-      startedAt: Date.now(),
-      lastSpeechAt: Date.now()
-    };
   }
 }
