@@ -100,6 +100,14 @@ let activeTranscriptService:
   | undefined;
 let transcriptController: StreamController | undefined;
 let activeItem: ConversationItem | undefined;
+let graceWindowTimer: number | undefined;
+
+function clearGraceWindow() {
+  if (graceWindowTimer !== undefined) {
+    window.clearTimeout(graceWindowTimer);
+    graceWindowTimer = undefined;
+  }
+}
 
 function handleTranscriptUpdate(
   text: string,
@@ -108,18 +116,20 @@ function handleTranscriptUpdate(
 ) {
   const currentStatus = get().status;
 
-  if (currentStatus === "PossibleEnd") {
+  // Speech resumed during Grace Window: reopen candidate question and append speech
+  if (currentStatus === "FinalizingQuestion" || currentStatus === "PossibleEnd") {
+    clearGraceWindow();
     set({ status: "Listening", liveTranscript: text });
   } else {
     set({ liveTranscript: text });
   }
 
-  // While answering or finalizing, accumulate speech for next turn without triggering turn detection
-  if (currentStatus === "Answering" || currentStatus === "FinalizingQuestion") {
+  // While answering, accumulate speech for next turn without triggering turn detection
+  if (currentStatus === "Answering") {
     return;
   }
 
-  smartDetector.updateTranscript(
+  smartDetector.updateTurn(
     text,
     () => {
       if (get().status === "Listening") {
@@ -127,12 +137,12 @@ function handleTranscriptUpdate(
       }
     },
     (candidate) => {
-      finalizeTurn(candidate.text, set, get);
+      startGraceWindow(candidate.text, set, get);
     }
   );
 }
 
-function finalizeTurn(
+function startGraceWindow(
   questionText: string,
   set: (partial: Partial<CopilotState>) => void,
   get: () => CopilotState
@@ -142,21 +152,40 @@ function finalizeTurn(
     return;
   }
 
-  // 1. Reset detector timers
+  clearGraceWindow();
+  set({ status: "FinalizingQuestion" });
+
+  // Grace Window (~1.8 seconds) to allow interviewer speech resumption
+  graceWindowTimer = window.setTimeout(() => {
+    commitQuestion(text, set, get);
+  }, 1800);
+}
+
+function commitQuestion(
+  questionText: string,
+  set: (partial: Partial<CopilotState>) => void,
+  get: () => CopilotState
+) {
+  clearGraceWindow();
+  const text = questionText.trim();
+  if (!text) {
+    return;
+  }
+
+  // 1. Reset smart detector
   smartDetector.reset();
 
-  // 2. Clear current turn buffer on STT service while leaving connection open
+  // 2. Clear current turn buffer on STT service while keeping WebSocket session alive
   if (typeof activeTranscriptService?.resetTurn === "function") {
     activeTranscriptService.resetTurn();
   }
 
   // 3. Clear liveTranscript for the new turn
   set({
-    status: "FinalizingQuestion",
     liveTranscript: ""
   });
 
-  // 4. Create new conversation item for this turn
+  // 4. Create single committed conversation item for the entire turn
   const newItem: ConversationItem = {
     id: crypto.randomUUID(),
     startedAt: Date.now(),
@@ -166,7 +195,7 @@ function finalizeTurn(
   };
   activeItem = newItem;
 
-  // 5. Stream answer for finalized question
+  // 5. Stream answer for committed question
   void streamAnswerForItem(newItem, set, get).catch((error: unknown) => {
     set({
       status: "Error",
@@ -241,6 +270,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
   error: undefined,
   startListening: () => {
     transcriptController?.stop();
+    clearGraceWindow();
     smartDetector.reset();
 
     activeItem = undefined;
@@ -305,6 +335,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     });
   },
   pause: () => {
+    clearGraceWindow();
     smartDetector.reset();
     transcriptController?.stop();
     transcriptController = undefined;
@@ -313,7 +344,11 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     set({ status: "Idle", audioLevel: 0 });
   },
   finalizeQuestionNow: () => {
-    finalizeTurn(get().liveTranscript, set, get);
+    const text = get().liveTranscript.trim();
+    if (!text) {
+      return;
+    }
+    commitQuestion(text, set, get);
   },
   toggleHistoryDrawer: () => set((state) => ({ isHistoryOpen: !state.isHistoryOpen })),
   setHistoryOpen: (open: boolean) => set({ isHistoryOpen: open }),

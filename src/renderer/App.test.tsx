@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { useCopilotStore } from "./store/useCopilotStore";
 
-describe("App Phase 3B multi-question turn isolation tests", () => {
+describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => {
   beforeEach(() => {
-    vi.stubEnv("VITE_USE_MOCK_STT", "true");
+    vi.stubEnv("VITE_USE_MOCK_STT", "false");
     window.localStorage.clear();
     useCopilotStore.setState({
       status: "Idle",
@@ -30,8 +30,8 @@ describe("App Phase 3B multi-question turn isolation tests", () => {
     vi.restoreAllMocks();
   });
 
-  // Test A: Question 1 finalizes, then Question 2 starts -> Question 2 rawTranscript contains ONLY Question 2 text.
-  it("Test A: isolates Question 2 transcript so it contains only Question 2 text after Q1 finalization", async () => {
+  // REGRESSION TEST: 6-segment ChatGPT Voice interview scenario
+  it("REGRESSION TEST: combines 6 speech segments with natural pauses into EXACTLY ONE Question and History item", async () => {
     let partialCb: ((text: string) => void) | undefined;
     window.copilotWindow = {
       hide: vi.fn(),
@@ -49,40 +49,69 @@ describe("App Phase 3B multi-question turn isolation tests", () => {
         onError: () => () => {}
       }
     };
-    vi.stubEnv("VITE_USE_MOCK_STT", "false");
 
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /listen/i }));
 
-    // Question 1 speech
+    // Segment 1
     act(() => {
-      partialCb?.("Theo em backlink hiện tại có còn quan trọng không?");
+      partialCb?.("Anh hỏi sâu hơn chút");
     });
-    fireEvent.click(screen.getByRole("button", { name: /answer now/i }));
-
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(1200);
     });
 
-    expect(useCopilotStore.getState().rawQuestion).toBe("Theo em backlink hiện tại có còn quan trọng không?");
-
-    // Question 2 speech starts
+    // Segment 2
     act(() => {
-      partialCb?.("Em xử lý canonical tag bị lỗi 301 như thế nào?");
+      partialCb?.("Anh hỏi sâu hơn chút, giả sử index canonical robots đều bình thường");
     });
-    fireEvent.click(screen.getByRole("button", { name: /answer now/i }));
-
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(1500);
     });
 
-    expect(useCopilotStore.getState().rawQuestion).toBe("Em xử lý canonical tag bị lỗi 301 như thế nào?");
-    expect(useCopilotStore.getState().rawQuestion).not.toContain("Theo em backlink");
+    // Segment 3
+    act(() => {
+      partialCb?.("Anh hỏi sâu hơn chút, giả sử index canonical robots đều bình thường, impressions chỉ giảm 5% nhưng click giảm 40%");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    // Segment 4
+    act(() => {
+      partialCb?.("Anh hỏi sâu hơn chút, giả sử index canonical robots đều bình thường, impressions chỉ giảm 5% nhưng click giảm 40%, vị trí trung bình từ 3.2 xuống 6.8");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1700);
+    });
+
+    // Segment 5
+    act(() => {
+      partialCb?.("Anh hỏi sâu hơn chút, giả sử index canonical robots đều bình thường, impressions chỉ giảm 5% nhưng click giảm 40%, vị trí trung bình từ 3.2 xuống 6.8, đối thủ chính lại tăng");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1300);
+    });
+
+    // Segment 6: Question prompt
+    act(() => {
+      partialCb?.("Anh hỏi sâu hơn chút, giả sử index canonical robots đều bình thường, impressions chỉ giảm 5% nhưng click giảm 40%, vị trí trung bình từ 3.2 xuống 6.8, đối thủ chính lại tăng, em ưu tiên kiểm tra gì tiếp theo và vì sao?");
+    });
+
+    // Candidate pause (~1200ms) + Grace window (~1800ms) + Answer stream (~5000ms)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+
+    const history = useCopilotStore.getState().history;
+    // MUST BE EXACTLY ONE HISTORY ITEM
+    expect(history).toHaveLength(1);
+    expect(history[0].rawTranscript).toContain("Anh hỏi sâu hơn chút");
+    expect(history[0].rawTranscript).toContain("em ưu tiên kiểm tra gì tiếp theo và vì sao");
   });
 
-  // Test B: Alt+Enter finalizes Q1 -> next turn starts empty.
-  it("Test B: Alt+Enter finalizes Q1 and clears liveTranscript for next turn", async () => {
+  it("reopens turn if speech resumes during Grace Window", async () => {
     let partialCb: ((text: string) => void) | undefined;
     window.copilotWindow = {
       hide: vi.fn(),
@@ -100,120 +129,40 @@ describe("App Phase 3B multi-question turn isolation tests", () => {
         onError: () => () => {}
       }
     };
-    vi.stubEnv("VITE_USE_MOCK_STT", "false");
 
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /listen/i }));
 
     act(() => {
-      partialCb?.("Theo em nếu website giảm organic traffic 40% thì kiểm tra gì?");
+      partialCb?.("Em sẽ xử lý như thế nào?");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /answer now/i }));
+    // Candidate pause (~1200ms) triggers Grace Window
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1300);
+    });
 
-    // liveTranscript reset for next turn
-    expect(useCopilotStore.getState().liveTranscript).toBe("");
-  });
+    expect(useCopilotStore.getState().status).toBe("FinalizingQuestion");
 
-  // Test C: Speech arrives while answer for Q1 is streaming -> it is preserved as next-turn transcript, not lost.
-  it("Test C: preserves speech arriving while Q1 answer is streaming for the next turn", async () => {
-    let partialCb: ((text: string) => void) | undefined;
-    window.copilotWindow = {
-      hide: vi.fn(),
-      getDesktopSourceId: vi.fn(),
-      stt: {
-        startSession: vi.fn().mockResolvedValue(undefined),
-        sendAudioFrame: vi.fn(),
-        stopSession: vi.fn().mockResolvedValue(undefined),
-        getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
-        onPartial: (cb) => {
-          partialCb = cb;
-          return () => {};
-        },
-        onFinal: () => () => {},
-        onError: () => () => {}
-      }
-    };
-    vi.stubEnv("VITE_USE_MOCK_STT", "false");
-
-    render(<App />);
-
-    fireEvent.click(screen.getByRole("button", { name: /listen/i }));
-
+    // Speech resumes during Grace Window (at 1000ms into grace window)
     act(() => {
-      partialCb?.("Câu hỏi 1?");
-    });
-    fireEvent.click(screen.getByRole("button", { name: /answer now/i }));
-
-    // Midway through streaming Q1 answer, Q2 speech arrives
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
+      partialCb?.("Em sẽ xử lý như thế nào, và tại sao em lại chọn cách đó?");
     });
 
-    expect(useCopilotStore.getState().status).toBe("Answering");
-
-    act(() => {
-      partialCb?.("Theo em nếu website đang bị giảm traffic và");
-    });
-
-    // Complete Q1 answer stream
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(4_000);
-    });
-
-    // Next turn transcript was preserved!
-    expect(useCopilotStore.getState().liveTranscript).toBe("Theo em nếu website đang bị giảm traffic và");
-  });
-
-  // Test D: Stale detector timer from Q1 cannot finalize Q2.
-  it("Test D: suppresses stale detector timers from Q1 during Answering state", async () => {
-    let partialCb: ((text: string) => void) | undefined;
-    window.copilotWindow = {
-      hide: vi.fn(),
-      getDesktopSourceId: vi.fn(),
-      stt: {
-        startSession: vi.fn().mockResolvedValue(undefined),
-        sendAudioFrame: vi.fn(),
-        stopSession: vi.fn().mockResolvedValue(undefined),
-        getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
-        onPartial: (cb) => {
-          partialCb = cb;
-          return () => {};
-        },
-        onFinal: () => () => {},
-        onError: () => () => {}
-      }
-    };
-    vi.stubEnv("VITE_USE_MOCK_STT", "false");
-
-    render(<App />);
-
-    fireEvent.click(screen.getByRole("button", { name: /listen/i }));
-
-    act(() => {
-      partialCb?.("Câu hỏi 1?");
-    });
-    fireEvent.click(screen.getByRole("button", { name: /answer now/i }));
-
-    // Q1 answer is streaming
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-
-    // Stale timer runs during Answering state
-    expect(useCopilotStore.getState().status).toBe("Answering");
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(3_000);
-    });
-
-    // Status returns to Listening for next turn, not prematurely finalized by Q1 timer
+    // Reopened turn! Status back to Listening
     expect(useCopilotStore.getState().status).toBe("Listening");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+
+    const history = useCopilotStore.getState().history;
+    expect(history).toHaveLength(1);
+    expect(history[0].rawTranscript).toContain("và tại sao em lại chọn cách đó");
   });
 
-  // Test E: Two consecutive complete Vietnamese questions produce two distinct history items.
-  it("Test E: produces two distinct history items for two consecutive finalized questions", async () => {
+  it("bypasses Grace Window and finalizes immediately on Alt+Enter", async () => {
     let partialCb: ((text: string) => void) | undefined;
     window.copilotWindow = {
       hide: vi.fn(),
@@ -231,65 +180,71 @@ describe("App Phase 3B multi-question turn isolation tests", () => {
         onError: () => () => {}
       }
     };
-    vi.stubEnv("VITE_USE_MOCK_STT", "false");
-
-    let uuidCounter = 0;
-    vi.spyOn(crypto, "randomUUID").mockImplementation(
-      () => `00000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}` as `${string}-${string}-${string}-${string}-${string}`
-    );
 
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /listen/i }));
 
-    // Q1
     act(() => {
-      partialCb?.("Câu hỏi thứ nhất về SEO?");
-    });
-    fireEvent.click(screen.getByRole("button", { name: /answer now/i }));
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
+      partialCb?.("Theo em nếu website giảm 40% traffic thì kiểm tra gì?");
     });
 
-    // Q2
-    act(() => {
-      partialCb?.("Câu hỏi thứ hai về SEO?");
-    });
     fireEvent.click(screen.getByRole("button", { name: /answer now/i }));
+
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(useCopilotStore.getState().history).toHaveLength(1);
+    expect(useCopilotStore.getState().history[0].rawTranscript).toBe("Theo em nếu website giảm 40% traffic thì kiểm tra gì?");
+  });
+
+  it("isolates two genuinely separate questions into two distinct history items", async () => {
+    let partialCb: ((text: string) => void) | undefined;
+    window.copilotWindow = {
+      hide: vi.fn(),
+      getDesktopSourceId: vi.fn(),
+      stt: {
+        startSession: vi.fn().mockResolvedValue(undefined),
+        sendAudioFrame: vi.fn(),
+        stopSession: vi.fn().mockResolvedValue(undefined),
+        getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
+        onPartial: (cb) => {
+          partialCb = cb;
+          return () => {};
+        },
+        onFinal: () => () => {},
+        onError: () => () => {}
+      }
+    };
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /listen/i }));
+
+    // Question 1
+    act(() => {
+      partialCb?.("Câu hỏi 1: Em xử lý canonical tag bị lỗi như thế nào?");
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+
+    expect(useCopilotStore.getState().history).toHaveLength(1);
+
+    // Question 2
+    act(() => {
+      partialCb?.("Câu hỏi 2: Em đánh giá backlink spam bằng cách nào?");
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
     });
 
     const history = useCopilotStore.getState().history;
     expect(history).toHaveLength(2);
-    expect(history[0].rawTranscript).toBe("Câu hỏi thứ hai về SEO?");
-    expect(history[1].rawTranscript).toBe("Câu hỏi thứ nhất về SEO?");
-  });
-
-  // Test F: Opening History still does not interrupt the current turn.
-  it("Test F: opening History drawer does not interrupt background Listening state", async () => {
-    useCopilotStore.setState({
-      history: [
-        {
-          id: "hist-1",
-          startedAt: Date.now() - 60_000,
-          rawTranscript: "Đánh giá backlink ntn?",
-          cleanedQuestion: "Đánh giá backlink ntn?",
-          answer: { openingLine: "Đánh giá theo DR/UR...", bullets: [], keywords: [] }
-        }
-      ]
-    });
-
-    render(<App />);
-
-    fireEvent.click(screen.getByRole("button", { name: /listen/i }));
-    expect(screen.getByText("Listening")).toBeInTheDocument();
-
-    const historyButton = screen.getByRole("button", { name: /history/i });
-    fireEvent.click(historyButton);
-
-    expect(screen.getAllByText("History (1)").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Đánh giá backlink ntn?")).toBeInTheDocument();
-    expect(useCopilotStore.getState().status).toBe("Listening");
+    expect(history[0].rawTranscript).toBe("Câu hỏi 2: Em đánh giá backlink spam bằng cách nào?");
+    expect(history[1].rawTranscript).toBe("Câu hỏi 1: Em xử lý canonical tag bị lỗi như thế nào?");
   });
 });

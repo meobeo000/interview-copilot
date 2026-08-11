@@ -1,28 +1,43 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isVietnameseSentenceComplete, SmartQuestionDetector } from "./smartQuestionDetector";
+import {
+  hasQuestionIntent,
+  isSetupFragment,
+  isVietnameseSentenceComplete,
+  SmartQuestionDetector
+} from "./smartQuestionDetector";
 
-describe("isVietnameseSentenceComplete heuristics", () => {
-  it("rejects incomplete sentences ending in conjunctions or incomplete phrases", () => {
-    expect(isVietnameseSentenceComplete("Theo em backlink")).toBe(false);
-    expect(isVietnameseSentenceComplete("Nếu website đang giảm traffic thì")).toBe(false);
-    expect(isVietnameseSentenceComplete("Ví dụ bên anh có một site")).toBe(false);
-    expect(isVietnameseSentenceComplete("Và trường hợp")).toBe(false);
-    expect(isVietnameseSentenceComplete("Theo em nếu")).toBe(false);
+describe("Vietnamese question intent & setup fragment heuristics", () => {
+  it("classifies setup context fragments correctly", () => {
+    expect(isSetupFragment("Anh hỏi sâu hơn chút")).toBe(true);
+    expect(isSetupFragment("Giả sử index canonical robots đều bình thường")).toBe(true);
+    expect(isSetupFragment("Impressions chỉ giảm 5% nhưng click giảm 40%")).toBe(true);
+    expect(isSetupFragment("Vị trí trung bình từ 3.2 xuống 6.8")).toBe(true);
+    expect(isSetupFragment("Đối thủ chính lại tăng")).toBe(true);
+    expect(isSetupFragment("Theo em nếu website")).toBe(true);
   });
 
-  it("approves complete Vietnamese question patterns and question marks", () => {
-    expect(isVietnameseSentenceComplete("Theo em backlink hiện tại còn quan trọng không?")).toBe(true);
+  it("detects valid Vietnamese question intents and request prefixes", () => {
+    expect(hasQuestionIntent("Em ưu tiên kiểm tra gì tiếp theo và vì sao?")).toBe(true);
+    expect(hasQuestionIntent("Trong trường hợp đó em sẽ xử lý như thế nào?")).toBe(true);
+    expect(hasQuestionIntent("Tại sao em lại chọn phương án đó?")).toBe(true);
+    expect(hasQuestionIntent("Em sẽ kiểm tra cái gì trước?")).toBe(true);
+    expect(hasQuestionIntent("Cho anh biết quy trình đánh giá audit site")).toBe(true);
+    expect(hasQuestionIntent("Em giải thích cách xử lý disavow")).toBe(true);
+    expect(hasQuestionIntent("Tại sao?")).toBe(true);
+    expect(hasQuestionIntent("Vì sao?")).toBe(true);
+  });
+
+  it("requires both absence of setup fragment and presence of question intent for complete sentence", () => {
+    expect(isVietnameseSentenceComplete("Anh hỏi sâu hơn chút")).toBe(false);
     expect(
       isVietnameseSentenceComplete(
-        "Nếu website giảm 40% organic traffic sau Core Update thì em sẽ kiểm tra gì trước?"
+        "Giả sử index canonical robots đều bình thường, em ưu tiên kiểm tra gì tiếp theo và vì sao?"
       )
     ).toBe(true);
-    expect(isVietnameseSentenceComplete("Em xử lý negative SEO như thế nào?")).toBe(true);
-    expect(isVietnameseSentenceComplete("Anh thấy phương án này có hợp lý không")).toBe(true);
   });
 });
 
-describe("SmartQuestionDetector turn detection timings", () => {
+describe("SmartQuestionDetector multi-segment turn accumulation", () => {
   let detector: SmartQuestionDetector;
 
   beforeEach(() => {
@@ -35,91 +50,34 @@ describe("SmartQuestionDetector turn detection timings", () => {
     vi.useRealTimers();
   });
 
-  it("does not finalize or trigger PossibleEnd on short pause (< 700ms)", () => {
+  it("accumulates multi-segment speech into one fullTurn without prematurely finalizing setup fragments", () => {
     const onPossibleEnd = vi.fn();
     const onFinalize = vi.fn();
 
-    detector.updateTranscript("Theo em backlink", onPossibleEnd, onFinalize);
-
-    vi.advanceTimersByTime(500);
-
-    expect(onPossibleEnd).not.toHaveBeenCalled();
-    expect(onFinalize).not.toHaveBeenCalled();
-  });
-
-  it("triggers PossibleEnd at 1000ms silence but does not finalize incomplete sentence", () => {
-    const onPossibleEnd = vi.fn();
-    const onFinalize = vi.fn();
-
-    detector.updateTranscript("Theo em nếu website bị giảm organic traffic và", onPossibleEnd, onFinalize);
-
-    vi.advanceTimersByTime(1100);
+    // Segment 1
+    const t1 = detector.appendSegment("Anh hỏi sâu hơn chút");
+    detector.updateTurn(t1, onPossibleEnd, onFinalize);
+    vi.advanceTimersByTime(1200);
 
     expect(onPossibleEnd).toHaveBeenCalled();
-    expect(onFinalize).not.toHaveBeenCalled();
-  });
+    expect(onFinalize).not.toHaveBeenCalled(); // Setup fragment, do NOT finalize!
 
-  it("resumes speech after candidate silence and cancels previous timers", () => {
-    const onPossibleEnd = vi.fn();
-    const onFinalize = vi.fn();
+    // Segment 2
+    const t2 = detector.appendSegment("Giả sử index canonical robots đều bình thường");
+    detector.updateTurn(t2, onPossibleEnd, onFinalize);
+    vi.advanceTimersByTime(1500);
 
-    detector.updateTranscript("Theo em nếu website bị giảm", onPossibleEnd, onFinalize);
-    vi.advanceTimersByTime(1100);
-    expect(onPossibleEnd).toHaveBeenCalledTimes(1);
-
-    // Speech resumes
-    detector.updateTranscript(
-      "Theo em nếu website bị giảm 40% organic traffic thì em kiểm tra gì trước?",
-      onPossibleEnd,
-      onFinalize
-    );
-
-    // Short time later
-    vi.advanceTimersByTime(500);
     expect(onFinalize).not.toHaveBeenCalled();
 
-    // 1000ms after new speech
-    vi.advanceTimersByTime(600);
+    // Segment 3: Question prompt arrives
+    const t3 = detector.appendSegment("Em ưu tiên kiểm tra gì tiếp theo và vì sao?");
+    detector.updateTurn(t3, onPossibleEnd, onFinalize);
+    vi.advanceTimersByTime(1300);
+
     expect(onFinalize).toHaveBeenCalledWith(
       expect.objectContaining({
         isComplete: true,
-        text: "Theo em nếu website bị giảm 40% organic traffic thì em kiểm tra gì trước?"
-      })
-    );
-  });
-
-  it("finalizes complete question at candidate silence (~1000ms)", () => {
-    const onPossibleEnd = vi.fn();
-    const onFinalize = vi.fn();
-
-    detector.updateTranscript(
-      "Em xử lý canonical tag bị lỗi 301 như thế nào?",
-      onPossibleEnd,
-      onFinalize
-    );
-
-    vi.advanceTimersByTime(1100);
-
-    expect(onPossibleEnd).toHaveBeenCalled();
-    expect(onFinalize).toHaveBeenCalledWith(
-      expect.objectContaining({
-        isComplete: true,
-        text: "Em xử lý canonical tag bị lỗi 301 như thế nào?"
-      })
-    );
-  });
-
-  it("hard timeout (~2800ms) eventually finalizes incomplete phrase if silence persists", () => {
-    const onPossibleEnd = vi.fn();
-    const onFinalize = vi.fn();
-
-    detector.updateTranscript("Ví dụ bên anh có một site mới tạo được ba tháng", onPossibleEnd, onFinalize);
-
-    vi.advanceTimersByTime(2900);
-
-    expect(onFinalize).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: "Ví dụ bên anh có một site mới tạo được ba tháng"
+        text: "Anh hỏi sâu hơn chút, Giả sử index canonical robots đều bình thường, Em ưu tiên kiểm tra gì tiếp theo và vì sao?"
       })
     );
   });
