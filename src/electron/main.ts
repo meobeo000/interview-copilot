@@ -1,8 +1,31 @@
+import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain } from "electron";
+import { SttMainService } from "./sttMainService";
+
+function loadEnvFile() {
+  const envPath = path.join(__dirname, "../.env");
+  if (fs.existsSync(envPath)) {
+    const content = fs.readFileSync(envPath, "utf-8");
+    content.split(/\r?\n/).forEach((line) => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("#")) {
+        const parts = trimmed.split("=");
+        const key = parts[0]?.trim();
+        const value = parts.slice(1).join("=").trim();
+        if (key && !process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    });
+  }
+}
+
+loadEnvFile();
 
 let mainWindow: BrowserWindow | undefined;
+const sttMainService = new SttMainService();
 
 function rendererUrl(): string {
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -78,6 +101,22 @@ app.whenReady().then(() => {
     return sources[0]?.id;
   });
 
+  ipcMain.handle("stt:start", async () => {
+    if (mainWindow) {
+      await sttMainService.startSession(mainWindow);
+    }
+  });
+
+  ipcMain.on("stt:send-audio-frame", (_event, buffer: ArrayBuffer) => {
+    sttMainService.sendAudioFrame(buffer);
+  });
+
+  ipcMain.handle("stt:stop", async () => {
+    await sttMainService.stopSession();
+  });
+
+  ipcMain.handle("stt:get-config", () => sttMainService.getConfig());
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -93,4 +132,5 @@ app.on("window-all-closed", () => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  void sttMainService.stopSession();
 });

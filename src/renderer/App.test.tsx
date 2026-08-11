@@ -7,6 +7,7 @@ import { useCopilotStore } from "./store/useCopilotStore";
 
 describe("App mocked interview flow", () => {
   beforeEach(() => {
+    vi.stubEnv("VITE_USE_MOCK_STT", "true");
     window.localStorage.clear();
     useCopilotStore.setState({
       status: "Idle",
@@ -26,6 +27,7 @@ describe("App mocked interview flow", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 

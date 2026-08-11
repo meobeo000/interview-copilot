@@ -1,13 +1,15 @@
 import { create } from "zustand";
 import { MockAudioCapture } from "../../audio/mockAudioCapture";
 import { SystemAudioCapture } from "../../audio/systemAudioCapture";
-import type { AudioCapture } from "../../audio/types";
+import type { AudioCapture, AudioFrame } from "../../audio/types";
 import { MockAnswerService } from "../../llm/mockAnswerService";
 import type { AnswerDelta } from "../../llm/types";
 import { MockQuestionDetector } from "../../question-detector/mockQuestionDetector";
 import { capHistory } from "../../shared/history";
 import type { AppStatus, ConversationItem, StreamController, SuggestedAnswer } from "../../shared/types";
 import { MockTranscriptService } from "../../transcription/mockTranscriptService";
+import { RealStreamingSTTService } from "../../transcription/realStreamingSTT";
+import type { TranscriptionService } from "../../transcription/types";
 
 const historyKey = "interview-copilot.history.v1";
 
@@ -58,6 +60,13 @@ function createAudioCapture(): AudioCapture {
   return new MockAudioCapture();
 }
 
+function createTranscriptService(): TranscriptionService & { sendAudio?: (frame: AudioFrame) => void } {
+  if (typeof import.meta !== "undefined" && import.meta.env?.VITE_USE_MOCK_STT === "true") {
+    return new MockTranscriptService();
+  }
+  return new RealStreamingSTTService();
+}
+
 interface CopilotState {
   status: AppStatus;
   audioLevel: number;
@@ -75,11 +84,11 @@ interface CopilotState {
   hideOverlay: () => Promise<void>;
 }
 
-const transcriptService = new MockTranscriptService();
 const detector = new MockQuestionDetector();
 const answerService = new MockAnswerService();
 const audioCapture = createAudioCapture();
 
+let activeTranscriptService: (TranscriptionService & { sendAudio?: (frame: AudioFrame) => void }) | undefined;
 let transcriptController: StreamController | undefined;
 let activeItem: ConversationItem | undefined;
 
@@ -150,10 +159,15 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
       error: undefined
     });
 
+    activeTranscriptService = createTranscriptService();
+
     void audioCapture
       .start(
         (frame) => {
           set({ audioLevel: frame.rmsLevel });
+          if (typeof activeTranscriptService?.sendAudio === "function") {
+            activeTranscriptService.sendAudio(frame);
+          }
         },
         (err) => {
           transcriptController?.stop();
@@ -175,7 +189,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
         });
       });
 
-    transcriptController = transcriptService.start({
+    transcriptController = activeTranscriptService.start({
       onPartial: (chunk) => set({ liveTranscript: chunk.text, status: "Listening" }),
       onFinal: (chunk) => {
         set({ liveTranscript: chunk.text });
@@ -191,7 +205,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
         const item = activeItem;
         if (!item?.rawTranscript) {
           void audioCapture.stop();
-          set({ status: "Error", audioLevel: 0, error: "Mock transcript finished without a captured question." });
+          set({ status: "Error", audioLevel: 0, error: "Transcript finished without a captured question." });
           return;
         }
 
@@ -228,12 +242,12 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
             });
             void streamAnswerForItem(detectedItem, set, get).catch((error: unknown) => {
               void audioCapture.stop();
-              set({ status: "Error", audioLevel: 0, error: error instanceof Error ? error.message : "Mock answer stream failed." });
+              set({ status: "Error", audioLevel: 0, error: error instanceof Error ? error.message : "Answer stream failed." });
             });
           })
           .catch((error: unknown) => {
             void audioCapture.stop();
-            set({ status: "Error", audioLevel: 0, error: error instanceof Error ? error.message : "Mock detector failed." });
+            set({ status: "Error", audioLevel: 0, error: error instanceof Error ? error.message : "Detector failed." });
           });
       }
     });
@@ -241,6 +255,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
   pause: () => {
     transcriptController?.stop();
     transcriptController = undefined;
+    activeTranscriptService = undefined;
     void audioCapture.stop();
     set({ status: "Idle", audioLevel: 0 });
   },
