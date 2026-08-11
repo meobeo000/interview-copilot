@@ -92,6 +92,10 @@ app.whenReady().then(() => {
     console.warn("Alt+Space global shortcut could not be registered.");
   }
 
+  globalShortcut.register("Alt+Enter", () => {
+    mainWindow?.webContents.send("shortcut:answer-now");
+  });
+
   ipcMain.handle("window:hide", () => {
     mainWindow?.hide();
   });

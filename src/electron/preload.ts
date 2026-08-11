@@ -3,6 +3,11 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("copilotWindow", {
   hide: () => ipcRenderer.invoke("window:hide"),
   getDesktopSourceId: () => ipcRenderer.invoke("system-audio:get-source-id"),
+  onAnswerNow: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("shortcut:answer-now", listener);
+    return () => ipcRenderer.removeListener("shortcut:answer-now", listener);
+  },
   stt: {
     startSession: () => ipcRenderer.invoke("stt:start"),
     sendAudioFrame: (buffer: ArrayBuffer) => ipcRenderer.send("stt:send-audio-frame", buffer),

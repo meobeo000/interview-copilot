@@ -4,7 +4,7 @@ import { SystemAudioCapture } from "../../audio/systemAudioCapture";
 import type { AudioCapture, AudioFrame } from "../../audio/types";
 import { MockAnswerService } from "../../llm/mockAnswerService";
 import type { AnswerDelta } from "../../llm/types";
-import { MockQuestionDetector } from "../../question-detector/mockQuestionDetector";
+import { SmartQuestionDetector } from "../../question-detector/smartQuestionDetector";
 import { capHistory } from "../../shared/history";
 import type { AppStatus, ConversationItem, StreamController, SuggestedAnswer } from "../../shared/types";
 import { MockTranscriptService } from "../../transcription/mockTranscriptService";
@@ -77,24 +77,38 @@ interface CopilotState {
   questionConfidence?: number;
   answer: SuggestedAnswer;
   history: ConversationItem[];
+  isHistoryOpen: boolean;
   error?: string;
   startListening: () => void;
   pause: () => void;
+  finalizeQuestionNow: () => void;
+  toggleHistoryDrawer: () => void;
+  setHistoryOpen: (open: boolean) => void;
   regenerateAnswer: () => Promise<void>;
   hideOverlay: () => Promise<void>;
 }
 
-const detector = new MockQuestionDetector();
 const answerService = new MockAnswerService();
 const audioCapture = createAudioCapture();
+const smartDetector = new SmartQuestionDetector();
 
 let activeTranscriptService: (TranscriptionService & { sendAudio?: (frame: AudioFrame) => void }) | undefined;
 let transcriptController: StreamController | undefined;
 let activeItem: ConversationItem | undefined;
 
-async function streamAnswerForItem(item: ConversationItem, set: (partial: Partial<CopilotState>) => void, get: () => CopilotState) {
+async function streamAnswerForItem(
+  item: ConversationItem,
+  set: (partial: Partial<CopilotState>) => void,
+  get: () => CopilotState
+) {
   let nextAnswer = emptyAnswer();
-  set({ status: "Answering", answer: nextAnswer });
+  set({
+    status: "Answering",
+    answer: nextAnswer,
+    rawQuestion: item.rawTranscript,
+    cleanedQuestion: item.cleanedQuestion ?? item.rawTranscript,
+    detectedTopic: item.detectedTopic ?? "SEO Question"
+  });
 
   for await (const delta of answerService.streamAnswer({
     question: item.cleanedQuestion ?? item.rawTranscript,
@@ -123,8 +137,9 @@ async function streamAnswerForItem(item: ConversationItem, set: (partial: Partia
 
   const history = capHistory(nextHistory);
   writeHistory(history);
-  void audioCapture.stop();
-  set({ status: "Idle", audioLevel: 0, history });
+
+  // After answer streaming completes, return to background Listening state
+  set({ status: "Listening", history });
 }
 
 export const useCopilotStore = create<CopilotState>((set, get) => ({
@@ -137,15 +152,13 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
   questionConfidence: undefined,
   answer: emptyAnswer(),
   history: readHistory(),
+  isHistoryOpen: false,
   error: undefined,
   startListening: () => {
     transcriptController?.stop();
-    const startedAt = Date.now();
-    activeItem = {
-      id: crypto.randomUUID(),
-      startedAt,
-      rawTranscript: ""
-    };
+    smartDetector.reset();
+
+    activeItem = undefined;
 
     set({
       status: "Listening",
@@ -189,14 +202,50 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
         });
       });
 
-    transcriptController = activeTranscriptService.start({
-      onPartial: (chunk) => set({ liveTranscript: chunk.text, status: "Listening" }),
-      onFinal: (chunk) => {
-        set({ liveTranscript: chunk.text });
-        if (activeItem) {
-          activeItem = { ...activeItem, rawTranscript: chunk.text, completedAt: chunk.completedAt };
+    const handleTranscriptUpdate = (text: string) => {
+      const currentStatus = get().status;
+      // Speech resumed: if candidate end was active, reset to Listening
+      if (currentStatus === "PossibleEnd") {
+        set({ status: "Listening", liveTranscript: text });
+      } else {
+        set({ liveTranscript: text });
+      }
+
+      smartDetector.updateTranscript(
+        text,
+        () => {
+          if (get().status === "Listening") {
+            set({ status: "PossibleEnd" });
+          }
+        },
+        (candidate) => {
+          const currentText = candidate.text.trim();
+          if (!currentText || get().status === "FinalizingQuestion" || get().status === "Answering") {
+            return;
+          }
+
+          set({ status: "FinalizingQuestion" });
+          const newItem: ConversationItem = {
+            id: crypto.randomUUID(),
+            startedAt: Date.now(),
+            rawTranscript: currentText,
+            cleanedQuestion: currentText,
+            detectedTopic: "Vietnamese SEO Question"
+          };
+          activeItem = newItem;
+          void streamAnswerForItem(newItem, set, get).catch((error: unknown) => {
+            set({
+              status: "Error",
+              error: error instanceof Error ? error.message : "Answer stream failed."
+            });
+          });
         }
-      },
+      );
+    };
+
+    transcriptController = activeTranscriptService.start({
+      onPartial: (chunk) => handleTranscriptUpdate(chunk.text),
+      onFinal: (chunk) => handleTranscriptUpdate(chunk.text),
       onError: (error) => {
         void audioCapture.stop();
         set({ status: "Error", audioLevel: 0, error: error.message });
@@ -205,60 +254,47 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
         const item = activeItem;
         if (!item?.rawTranscript) {
           void audioCapture.stop();
-          set({ status: "Error", audioLevel: 0, error: "Transcript finished without a captured question." });
+          set({ status: "Error", audioLevel: 0, error: "Transcript finished without a question." });
           return;
         }
-
-        set({ status: "Processing" });
-        void detector
-          .analyze(item.rawTranscript)
-          .then((result) => {
-            if (!result.isQuestion || !result.cleanedQuestion) {
-              transcriptController?.stop();
-              transcriptController = undefined;
-              void audioCapture.stop();
-              set({
-                status: "Idle",
-                audioLevel: 0,
-                questionConfidence: result.confidence,
-                error: result.reason ?? "Question confidence is low; stopped listening."
-              });
-              return;
-            }
-
-            const detectedItem: ConversationItem = {
-              ...item,
-              cleanedQuestion: result.cleanedQuestion,
-              detectedTopic: result.topic,
-              questionConfidence: result.confidence
-            };
-            activeItem = detectedItem;
-            set({
-              rawQuestion: detectedItem.rawTranscript,
-              cleanedQuestion: detectedItem.cleanedQuestion ?? "",
-              detectedTopic: detectedItem.detectedTopic ?? "",
-              questionConfidence: detectedItem.questionConfidence,
-              error: undefined
-            });
-            void streamAnswerForItem(detectedItem, set, get).catch((error: unknown) => {
-              void audioCapture.stop();
-              set({ status: "Error", audioLevel: 0, error: error instanceof Error ? error.message : "Answer stream failed." });
-            });
-          })
-          .catch((error: unknown) => {
-            void audioCapture.stop();
-            set({ status: "Error", audioLevel: 0, error: error instanceof Error ? error.message : "Detector failed." });
-          });
       }
     });
   },
   pause: () => {
+    smartDetector.reset();
     transcriptController?.stop();
     transcriptController = undefined;
     activeTranscriptService = undefined;
     void audioCapture.stop();
     set({ status: "Idle", audioLevel: 0 });
   },
+  finalizeQuestionNow: () => {
+    const text = get().liveTranscript.trim();
+    if (!text || get().status === "FinalizingQuestion" || get().status === "Answering") {
+      return;
+    }
+
+    smartDetector.reset();
+    set({ status: "FinalizingQuestion" });
+
+    const newItem: ConversationItem = {
+      id: crypto.randomUUID(),
+      startedAt: Date.now(),
+      rawTranscript: text,
+      cleanedQuestion: text,
+      detectedTopic: "Manual Finalized Question"
+    };
+    activeItem = newItem;
+
+    void streamAnswerForItem(newItem, set, get).catch((error: unknown) => {
+      set({
+        status: "Error",
+        error: error instanceof Error ? error.message : "Answer stream failed."
+      });
+    });
+  },
+  toggleHistoryDrawer: () => set((state) => ({ isHistoryOpen: !state.isHistoryOpen })),
+  setHistoryOpen: (open: boolean) => set({ isHistoryOpen: open }),
   regenerateAnswer: async () => {
     const question = activeItem;
     if (!question?.cleanedQuestion) {

@@ -1,4 +1,12 @@
-export type AppStatus = "Idle" | "Listening" | "Processing" | "Answering" | "Error";
+export type AppStatus =
+  | "Idle"
+  | "Listening"
+  | "PossibleEnd"
+  | "FinalizingQuestion"
+  | "QuestionReady"
+  | "Processing"
+  | "Answering"
+  | "Error";
 
 export interface ConversationItem {
   id: string;

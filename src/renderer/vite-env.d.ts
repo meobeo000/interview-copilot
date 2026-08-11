@@ -4,6 +4,7 @@ interface Window {
   copilotWindow: {
     hide: () => Promise<void>;
     getDesktopSourceId: () => Promise<string | undefined>;
+    onAnswerNow?: (callback: () => void) => () => void;
     stt?: {
       startSession: () => Promise<void>;
       sendAudioFrame: (buffer: ArrayBuffer) => void;
