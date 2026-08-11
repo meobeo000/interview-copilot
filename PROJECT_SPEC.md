@@ -14,8 +14,51 @@ Primary UX:
 
 Latency target: first useful answer text should appear about 1–2 seconds after the interviewer finishes speaking under normal network conditions.
 
+## P0 — Vietnamese-first transcription
+Vietnamese is a core product requirement, not an optional language add-on.
+
+The real STT implementation MUST be selected and validated primarily for Vietnamese interview speech.
+
+It must handle:
+- Natural Vietnamese conversation.
+- Fast speech and words that sound connected together.
+- Minor hesitation, filler words and incomplete phrases.
+- Reasonable variation in Vietnamese regional accents.
+- Vietnamese mixed with English SEO terminology in the same sentence.
+- Common interview-call audio degradation such as compression, low volume and moderate background noise.
+
+Important mixed-language examples include:
+- backlink
+- referring domain
+- anchor text
+- Google Search Console / GSC
+- GA4
+- Ahrefs
+- Semrush
+- Core Update
+- Helpful Content
+- canonical
+- crawl budget
+- robots.txt
+- sitemap
+- redirect 301
+- 404
+- indexing / deindex
+- negative SEO
+- expired domain
+- internal linking
+- search intent
+- cannibalization
+
+The system does NOT need perfect word-for-word transcription to answer correctly, but it must preserve the intended meaning of the interviewer question.
+
+If transcription or question interpretation confidence is low, the system must show that uncertainty and continue listening rather than inventing a question.
+
+Vietnamese production readiness must be tested using real Vietnamese audio. English-only demo audio is not sufficient for acceptance.
+
 ## Product principles
 - Windows-first.
+- Vietnamese-first for transcription and interview answer generation.
 - One compact always-on-top overlay, not a dashboard-heavy app.
 - Live transcript must remain readable while the interviewer is speaking.
 - Completed question must remain visible while the answer streams.
@@ -36,8 +79,8 @@ Latency target: first useful answer text should appear about 1–2 seconds after
 - AI answer area.
 - Last 5 Q&A items in local history.
 - Mock audio/transcript/AI pipeline in Phase 1.
-- Real Windows system-audio capture in later phase.
-- Streaming Vietnamese transcription with mixed English SEO terminology.
+- Real Windows system-audio capture in Phase 2.
+- Streaming Vietnamese-first transcription with mixed English SEO terminology in Phase 3.
 - End-of-question detection.
 - Streaming AI answer.
 - Optional interview context: CV/JD/SEO profile pasted locally.
@@ -59,9 +102,11 @@ Latency target: first useful answer text should appear about 1–2 seconds after
 - Zustand
 - Electron IPC between main and renderer
 - Windows audio capture via WASAPI loopback or a proven Electron-compatible Windows system-audio approach
-- Streaming speech-to-text service
+- A streaming STT provider chosen after Vietnamese-specific evaluation
 - OpenAI model for question interpretation and answer generation
 - Local JSON or lightweight local storage for settings/history initially
+
+Do not lock the final STT provider before testing Vietnamese accuracy, mixed Vietnamese/English SEO vocabulary and latency using real call audio.
 
 ## Runtime architecture
 ```text
@@ -74,7 +119,7 @@ Windows system audio
 Streaming audio capture
         |
         v
-Streaming STT ---------------------> Live transcript UI
+Vietnamese-first Streaming STT ----> Live transcript UI
         |
         v
 Rolling transcript buffer
@@ -86,7 +131,7 @@ End-of-question detector
 Question normalizer / context builder
         |
         v
-LLM answer stream ----------------> Answer UI
+LLM answer stream -----------------> Answer UI
 ```
 
 Important: do not wait for a full audio recording before transcription. The pipeline must remain streaming.
@@ -149,13 +194,16 @@ interface SuggestedAnswer {
 While speaking:
 - Show partial transcript continuously.
 - Do not overwrite already-finalized transcript segments incorrectly.
-- Support Vietnamese mixed with English SEO terms.
+- Preserve Vietnamese diacritics where supported by STT output.
+- Support Vietnamese mixed naturally with English SEO terms.
+- Keep enough rolling context to recover meaning from imperfect partial transcripts.
 
 When question ends:
 - Freeze/store raw transcript.
 - Produce cleanedQuestion separately.
 - Never destroy rawTranscript.
 - Keep question visible while AI answer streams.
+- Use recent context to repair minor STT mistakes without silently rewriting the raw transcript.
 
 ## End-of-question behavior
 Do not rely on silence alone.
@@ -177,7 +225,8 @@ The model should receive:
 - SEO vocabulary hints.
 
 The model should:
-- Infer intended question despite minor transcription errors.
+- Infer intended question despite minor Vietnamese transcription errors.
+- Handle Vietnamese sentences containing English SEO terminology.
 - Return low confidence rather than inventing a question.
 - Answer in concise Vietnamese suitable for natural speech.
 - Keep established SEO terms in English where natural.
@@ -204,30 +253,6 @@ Suggested structured output:
 }
 ```
 
-## SEO vocabulary hints
-Include at least:
-- Google Search Console / GSC
-- GA4
-- Ahrefs
-- Semrush
-- Core Update
-- Helpful Content
-- backlink
-- referring domain
-- anchor text
-- DR / UR
-- canonical
-- crawl budget
-- robots.txt
-- sitemap
-- 301 / 404
-- indexing / deindex
-- negative SEO
-- expired domain
-- internal linking
-- search intent
-- cannibalization
-
 ## Security
 - No OpenAI/API secret in React renderer bundle.
 - Secrets live in Electron main process or secure local configuration.
@@ -248,7 +273,7 @@ Deliver:
 - Persistent Question component.
 - Streaming Answer component.
 - Local last-5 history.
-- Fake transcript simulator that appends partial text over time.
+- Fake Vietnamese transcript simulator that appends partial text over time and includes English SEO terms.
 - Mock end-of-question detector.
 - Mock answer stream one bullet at a time.
 - Clean service interfaces so mocks can be swapped later.
@@ -274,18 +299,49 @@ Do not implement real audio or OpenAI in Phase 1.
 - Validate with Google Meet and Telegram Desktop.
 - Keep capture isolated from microphone when possible.
 - Add audio level diagnostics.
+- Save/test short local diagnostic samples only when explicitly enabled for development.
 
-### Phase 3 — Streaming STT
+### Phase 3 — Vietnamese-first Streaming STT
+This phase is P0 and must not be accepted based on English-only testing.
+
+Requirements:
 - Persistent streaming connection.
-- Partial transcript events.
+- Partial transcript events while interviewer is speaking.
 - Final transcript segments.
-- Vietnamese + English SEO terminology.
+- Vietnamese is the primary language target.
+- Vietnamese + English SEO terminology in the same utterance.
 - Reconnection handling.
 - Rolling 20–30 second transcript buffer.
+- Confidence/uncertainty signaling where available.
+- Vocabulary/context hints when supported by provider.
+
+Required Vietnamese test set must include at least:
+1. Clear Vietnamese SEO question.
+2. Fast Vietnamese speech.
+3. Vietnamese mixed with English SEO terms.
+4. Short pauses inside a sentence.
+5. Moderate call compression/background noise.
+6. At least two different Vietnamese speakers if available.
+7. A question containing terms such as GSC, Core Update, backlink, Ahrefs, canonical and 301.
+
+Acceptance criteria:
+- Transcript appears incrementally while audio is playing.
+- Meaning of the question is preserved well enough for the downstream AI to identify the intended SEO question.
+- Common SEO English terms are not consistently converted into unrelated Vietnamese words.
+- Low-quality/unclear audio does not cause the system to confidently invent a different question.
+- Latency remains compatible with the overall 1–2 second post-question answer-start target.
+
+Before selecting the STT provider permanently, compare candidate implementations using the same Vietnamese test clips and record:
+- perceived transcription accuracy
+- mixed-language terminology accuracy
+- partial transcript latency
+- finalization latency
+- stability/reconnect behavior
+- estimated API cost
 
 ### Phase 4 — End-of-question + AI
 - Candidate speech-end detection.
-- Semantic completeness check.
+- Semantic completeness check for Vietnamese questions.
 - Question cleanup.
 - Context builder.
 - Streaming LLM answer.
@@ -308,7 +364,8 @@ Codex should not stop until all of these are true:
 - Electron app launches.
 - Overlay is frameless and always on top.
 - Alt+Space toggles the overlay.
-- Fake live transcript visibly streams text incrementally.
+- Fake Vietnamese live transcript visibly streams text incrementally.
+- Fake transcript contains natural Vietnamese mixed with SEO English terminology.
 - Fake question completion freezes the question in the Question area.
 - Fake AI answer streams beneath the question without removing the question.
 - At least 5 Q&A items can be retained in local history.
@@ -317,6 +374,8 @@ Codex should not stop until all of these are true:
 
 ## Codex execution instruction
 Implement only Phase 1 first. Do not prematurely implement real audio capture, STT, or OpenAI calls. Keep interfaces production-oriented so those components can be replaced in later phases.
+
+Vietnamese-first behavior must be reflected even in Phase 1 mocks so UI and later interfaces are designed around the actual target language from the beginning.
 
 At completion, report:
 1. Architecture summary.
