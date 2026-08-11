@@ -1,6 +1,6 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { app, BrowserWindow, globalShortcut, ipcMain } from "electron";
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain } from "electron";
 
 let mainWindow: BrowserWindow | undefined;
 
@@ -71,6 +71,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle("window:hide", () => {
     mainWindow?.hide();
+  });
+
+  ipcMain.handle("system-audio:get-source-id", async () => {
+    const sources = await desktopCapturer.getSources({ types: ["screen"] });
+    return sources[0]?.id;
   });
 
   app.on("activate", () => {

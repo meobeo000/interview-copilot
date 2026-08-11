@@ -10,6 +10,7 @@ describe("App mocked interview flow", () => {
     window.localStorage.clear();
     useCopilotStore.setState({
       status: "Idle",
+      audioLevel: 0,
       liveTranscript: "",
       rawQuestion: "",
       cleanedQuestion: "",

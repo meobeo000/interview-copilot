@@ -141,6 +141,43 @@ button {
   color: #230907;
 }
 
+.audio-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(238, 245, 242, 0.08);
+  border: 1px solid rgba(136, 217, 202, 0.2);
+}
+
+.meter-icon {
+  color: rgba(238, 245, 242, 0.45);
+  transition: color 0.15s ease;
+}
+
+.meter-icon.active {
+  color: #25a889;
+}
+
+.meter-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+
+.meter-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: rgba(238, 245, 242, 0.2);
+  transition: height 0.08s ease, background-color 0.1s ease;
+}
+
+.meter-bar.lit {
+  background: #25a889;
+}
+
 .panel {
   min-height: 0;
   overflow: auto;

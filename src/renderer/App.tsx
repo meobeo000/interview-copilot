@@ -1,4 +1,5 @@
 import { EyeOff, History, Pause, Play, RefreshCw } from "lucide-react";
+import { AudioMeter } from "./components/AudioMeter";
 import { AnswerPanel } from "./components/AnswerPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { QuestionPanel } from "./components/QuestionPanel";
@@ -9,6 +10,7 @@ import { useCopilotStore } from "./store/useCopilotStore";
 export function App() {
   const {
     status,
+    audioLevel,
     liveTranscript,
     rawQuestion,
     cleanedQuestion,
@@ -34,6 +36,7 @@ export function App() {
           <h1>Live Assist</h1>
         </div>
         <div className="window-actions">
+          <AudioMeter level={audioLevel} active={isListening} error={error} />
           <StatusPill status={status} />
           <button className="icon-button" type="button" onClick={hideOverlay} aria-label="Hide overlay" title="Hide overlay">
             <EyeOff size={18} />
