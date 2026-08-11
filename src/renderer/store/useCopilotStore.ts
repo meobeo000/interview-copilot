@@ -88,7 +88,18 @@ async function streamAnswerForItem(item: ConversationItem, set: (partial: Partia
     answer: nextAnswer
   };
   activeItem = completed;
-  const history = capHistory([completed, ...get().history]);
+
+  const currentHistory = get().history;
+  const existingIndex = currentHistory.findIndex((h) => h.id === completed.id);
+  let nextHistory: ConversationItem[];
+  if (existingIndex >= 0) {
+    nextHistory = [...currentHistory];
+    nextHistory[existingIndex] = completed;
+  } else {
+    nextHistory = [completed, ...currentHistory];
+  }
+
+  const history = capHistory(nextHistory);
   writeHistory(history);
   set({ status: "Idle", history });
 }
@@ -144,10 +155,12 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
           .analyze(item.rawTranscript)
           .then((result) => {
             if (!result.isQuestion || !result.cleanedQuestion) {
+              transcriptController?.stop();
+              transcriptController = undefined;
               set({
-                status: "Listening",
+                status: "Idle",
                 questionConfidence: result.confidence,
-                error: result.reason ?? "Question confidence is low; continuing to listen."
+                error: result.reason ?? "Question confidence is low; stopped listening."
               });
               return;
             }

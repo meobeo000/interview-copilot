@@ -1,4 +1,5 @@
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, globalShortcut, ipcMain } from "electron";
 
 let mainWindow: BrowserWindow | undefined;
@@ -8,7 +9,7 @@ function rendererUrl(): string {
     return process.env.VITE_DEV_SERVER_URL;
   }
 
-  return `file://${path.join(__dirname, "../dist/index.html")}`;
+  return pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
 }
 
 function createWindow() {
