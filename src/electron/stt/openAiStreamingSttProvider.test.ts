@@ -23,7 +23,7 @@ class FakeWebSocket extends EventEmitter {
   }
 }
 
-describe("OpenAIStreamingSttProvider", () => {
+describe("OpenAIStreamingSttProvider Transcription Schema", () => {
   it("defaults to gpt-4o-mini-transcribe and vi language in readOpenAiSttConfig", () => {
     const config = readOpenAiSttConfig({
       OPENAI_API_KEY: "sk-test-123456"
@@ -32,7 +32,7 @@ describe("OpenAIStreamingSttProvider", () => {
     expect(config.provider).toBe("openai");
     expect(config.model).toBe("gpt-4o-mini-transcribe");
     expect(config.language).toBe("vi");
-    expect(config.sampleRate).toBe(16000);
+    expect(config.sampleRate).toBe(24000);
     expect(config.sourceSampleRate).toBe(16000);
     expect(config.targetSampleRate).toBe(24000);
     expect(config.channels).toBe(1);
@@ -63,7 +63,7 @@ describe("OpenAIStreamingSttProvider", () => {
     ).rejects.toThrow("OPENAI_API_KEY is missing");
   });
 
-  it("initializes WebSocket connection, sends session.update, and routes partial/final transcripts", async () => {
+  it("sends official transcription-session schema and routes partial/final transcripts", async () => {
     const fakeWs = new FakeWebSocket();
     let requestedUrl = "";
     let requestedOptions: WebSocket.ClientOptions | undefined;
@@ -96,15 +96,37 @@ describe("OpenAIStreamingSttProvider", () => {
       "OpenAI-Beta": "realtime=v1"
     });
 
-    // Check session.update message sent
+    // Verify session.update message sent
     expect(fakeWs.sentData.length).toBeGreaterThanOrEqual(1);
     const sessionPayload = JSON.parse(fakeWs.sentData[0]) as {
       type: string;
-      session: { input_audio_transcription: { model: string; language: string } };
+      session: {
+        type: string;
+        input_audio_format?: unknown;
+        input_audio_transcription?: unknown;
+        audio: {
+          input: {
+            format: { type: string; rate: number };
+            transcription: { model: string; language: string; prompt: string };
+            turn_detection: { type: string };
+          };
+        };
+      };
     };
+
+    // Strict schema assertions
     expect(sessionPayload.type).toBe("session.update");
-    expect(sessionPayload.session.input_audio_transcription.model).toBe("gpt-4o-mini-transcribe");
-    expect(sessionPayload.session.input_audio_transcription.language).toBe("vi");
+    expect(sessionPayload.session.type).toBe("transcription");
+    expect(sessionPayload.session.audio.input.format.type).toBe("audio/pcm");
+    expect(sessionPayload.session.audio.input.format.rate).toBe(24000);
+    expect(sessionPayload.session.audio.input.transcription.model).toBe("gpt-4o-mini-transcribe");
+    expect(sessionPayload.session.audio.input.transcription.language).toBe("vi");
+    expect(sessionPayload.session.audio.input.transcription.prompt).toBe(DEFAULT_OPENAI_TRANSCRIBE_PROMPT);
+    expect(sessionPayload.session.audio.input.turn_detection.type).toBe("server_vad");
+
+    // Ensure NO legacy top-level fields exist on session
+    expect(sessionPayload.session.input_audio_format).toBeUndefined();
+    expect(sessionPayload.session.input_audio_transcription).toBeUndefined();
 
     // Simulate partial transcript delta
     fakeWs.emit(
@@ -141,6 +163,39 @@ describe("OpenAIStreamingSttProvider", () => {
     // Stop session
     await provider.stopSession();
     expect(fakeWs.readyState).toBe(WebSocket.CLOSED);
+  });
+
+  it("handles conversation.item.input_audio_transcription.failed event", async () => {
+    const fakeWs = new FakeWebSocket();
+    const mockFactory = vi.fn(() => fakeWs as unknown as WebSocket);
+
+    const config = readOpenAiSttConfig({
+      OPENAI_API_KEY: "sk-mock-key"
+    });
+
+    const provider = new OpenAIStreamingSttProvider(config, mockFactory);
+    const onError = vi.fn();
+
+    const startPromise = provider.startSession({ onPartial: vi.fn(), onFinal: vi.fn(), onError });
+    await Promise.resolve();
+    fakeWs.emit("open");
+    await startPromise;
+
+    fakeWs.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          type: "conversation.item.input_audio_transcription.failed",
+          error: { message: "Audio buffer overflow or corrupt frame" }
+        })
+      )
+    );
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("Transcription failed: Audio buffer overflow or corrupt frame")
+      })
+    );
   });
 
   it("surfaces authentication error details cleanly without exposing secrets", async () => {

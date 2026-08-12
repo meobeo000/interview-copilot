@@ -23,7 +23,7 @@ export function readOpenAiSttConfig(env: NodeJS.ProcessEnv = process.env): OpenA
     provider: "openai",
     model,
     language: "vi",
-    sampleRate: 16000,
+    sampleRate: 24000,
     channels: 1,
     encoding: "PCM16",
     isRealSttAvailable: Boolean(apiKey),
@@ -100,18 +100,30 @@ export class OpenAIStreamingSttProvider implements StreamingSttProvider {
       ws.on("open", () => {
         console.log(`[STT] Connected to OpenAI Realtime STT (${this.config.model}, ${this.config.language}).`);
 
-        // Send session configuration payload for input audio transcription
+        // Send official transcription-session schema
         const sessionUpdatePayload = {
           type: "session.update",
           session: {
-            type: "realtime",
-            input_audio_format: "pcm16",
-            input_audio_transcription: {
-              model: this.config.model,
-              language: this.config.language,
-              prompt: this.config.transcriptionPrompt
-            },
-            turn_detection: null
+            type: "transcription",
+            audio: {
+              input: {
+                format: {
+                  type: "audio/pcm",
+                  rate: this.config.targetSampleRate
+                },
+                transcription: {
+                  model: this.config.model,
+                  language: this.config.language,
+                  prompt: this.config.transcriptionPrompt
+                },
+                turn_detection: {
+                  type: "server_vad",
+                  threshold: 0.5,
+                  prefix_padding_ms: 300,
+                  silence_duration_ms: 500
+                }
+              }
+            }
           }
         };
 
@@ -133,6 +145,13 @@ export class OpenAIStreamingSttProvider implements StreamingSttProvider {
 
           if (response.type === "error" && response.error) {
             this.callbacks?.onError(new Error(formatOpenAiErrorMessage(response.error)));
+            return;
+          }
+
+          if (response.type === "conversation.item.input_audio_transcription.failed") {
+            const errDetail = response.error?.message || response.error?.code || "Transcription failed";
+            this.callbacks?.onError(new Error(formatOpenAiErrorMessage(`Transcription failed: ${errDetail}`)));
+            this.accumulatedPartialText = "";
             return;
           }
 
