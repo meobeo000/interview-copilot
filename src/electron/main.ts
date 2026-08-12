@@ -40,6 +40,15 @@ function createWindow() {
   });
 
   mainWindow.setAlwaysOnTop(true, "screen-saver");
+
+  mainWindow.webContents.on("did-fail-load", () => {
+    if (process.env.VITE_DEV_SERVER_URL) {
+      setTimeout(() => {
+        void mainWindow?.loadURL(rendererUrl());
+      }, 500);
+    }
+  });
+
   void mainWindow.loadURL(rendererUrl());
 
   mainWindow.once("ready-to-show", () => {
