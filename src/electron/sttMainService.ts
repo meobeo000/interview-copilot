@@ -121,9 +121,9 @@ export class SttMainService {
 
   private logConfig(config: SttConfig): void {
     if (config.provider === "openai") {
-      const openAiCfg = config as SttConfig & { sourceSampleRate?: number; targetSampleRate?: number };
+      const openAiCfg = config as SttConfig & { realtimeModel?: string; transcribeModel?: string; sourceSampleRate?: number; targetSampleRate?: number };
       console.log(
-        `[STT]\nprovider: ${config.provider}\nmodel: ${config.model}\nlanguage: ${config.language}\nsourceSampleRate: ${openAiCfg.sourceSampleRate ?? 16000}\ntargetSampleRate: ${openAiCfg.targetSampleRate ?? 24000}\nchannels: ${config.channels}\nwireEncoding: ${config.encoding.toLowerCase()}`
+        `[STT]\nprovider: ${config.provider}\nrealtimeModel: ${openAiCfg.realtimeModel ?? config.model}\ntranscribeModel: ${openAiCfg.transcribeModel ?? "gpt-4o-mini-transcribe"}\nlanguage: ${config.language}\nsourceSampleRate: ${openAiCfg.sourceSampleRate ?? 16000}\ntargetSampleRate: ${openAiCfg.targetSampleRate ?? 24000}\nchannels: ${config.channels}\nwireEncoding: ${config.encoding.toLowerCase()}`
       );
       return;
     }

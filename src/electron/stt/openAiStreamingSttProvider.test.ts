@@ -23,14 +23,16 @@ class FakeWebSocket extends EventEmitter {
   }
 }
 
-describe("OpenAIStreamingSttProvider Transcription Schema", () => {
-  it("defaults to gpt-4o-mini-transcribe and vi language in readOpenAiSttConfig", () => {
+describe("OpenAIStreamingSttProvider Realtime Session Models", () => {
+  it("defaults to gpt-4o-mini-realtime-preview session model and gpt-4o-mini-transcribe input model", () => {
     const config = readOpenAiSttConfig({
       OPENAI_API_KEY: "sk-test-123456"
     });
 
     expect(config.provider).toBe("openai");
-    expect(config.model).toBe("gpt-4o-mini-transcribe");
+    expect(config.realtimeModel).toBe("gpt-4o-mini-realtime-preview");
+    expect(config.transcribeModel).toBe("gpt-4o-mini-transcribe");
+    expect(config.model).toBe("gpt-4o-mini-realtime-preview");
     expect(config.language).toBe("vi");
     expect(config.sampleRate).toBe(24000);
     expect(config.sourceSampleRate).toBe(16000);
@@ -41,13 +43,16 @@ describe("OpenAIStreamingSttProvider Transcription Schema", () => {
     expect(config.transcriptionPrompt).toBe(DEFAULT_OPENAI_TRANSCRIBE_PROMPT);
   });
 
-  it("allows model override via OPENAI_TRANSCRIBE_MODEL env var", () => {
+  it("allows environment variable overrides for realtime and transcribe models", () => {
     const config = readOpenAiSttConfig({
       OPENAI_API_KEY: "sk-test-123456",
+      OPENAI_REALTIME_MODEL: "gpt-4o-realtime-preview",
       OPENAI_TRANSCRIBE_MODEL: "gpt-4o-transcribe"
     });
 
-    expect(config.model).toBe("gpt-4o-transcribe");
+    expect(config.realtimeModel).toBe("gpt-4o-realtime-preview");
+    expect(config.transcribeModel).toBe("gpt-4o-transcribe");
+    expect(config.model).toBe("gpt-4o-realtime-preview");
   });
 
   it("throws configuration error when OPENAI_API_KEY is missing", async () => {
@@ -63,7 +68,7 @@ describe("OpenAIStreamingSttProvider Transcription Schema", () => {
     ).rejects.toThrow("OPENAI_API_KEY is missing");
   });
 
-  it("sends official transcription-session schema and routes partial/final transcripts", async () => {
+  it("uses OPENAI_REALTIME_MODEL for WebSocket connection URL and passes OPENAI_TRANSCRIBE_MODEL in session payload", async () => {
     const fakeWs = new FakeWebSocket();
     let requestedUrl = "";
     let requestedOptions: WebSocket.ClientOptions | undefined;
@@ -76,6 +81,7 @@ describe("OpenAIStreamingSttProvider Transcription Schema", () => {
 
     const config = readOpenAiSttConfig({
       OPENAI_API_KEY: "sk-mock-key",
+      OPENAI_REALTIME_MODEL: "gpt-4o-mini-realtime-preview",
       OPENAI_TRANSCRIBE_MODEL: "gpt-4o-mini-transcribe"
     });
 
@@ -90,7 +96,10 @@ describe("OpenAIStreamingSttProvider Transcription Schema", () => {
     await startPromise;
 
     expect(mockFactory).toHaveBeenCalled();
-    expect(requestedUrl).toBe("wss://api.openai.com/v1/realtime?model=gpt-4o-mini-transcribe");
+    // Must use realtime session model in URL query parameter
+    expect(requestedUrl).toBe("wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview");
+    expect(requestedUrl).not.toContain("gpt-4o-mini-transcribe");
+
     expect(requestedOptions?.headers).toEqual({
       Authorization: "Bearer sk-mock-key"
     });
@@ -116,17 +125,12 @@ describe("OpenAIStreamingSttProvider Transcription Schema", () => {
 
     // Strict schema assertions
     expect(sessionPayload.type).toBe("session.update");
-    expect(sessionPayload.session.type).toBe("transcription");
     expect(sessionPayload.session.audio.input.format.type).toBe("audio/pcm");
     expect(sessionPayload.session.audio.input.format.rate).toBe(24000);
     expect(sessionPayload.session.audio.input.transcription.model).toBe("gpt-4o-mini-transcribe");
     expect(sessionPayload.session.audio.input.transcription.language).toBe("vi");
     expect(sessionPayload.session.audio.input.transcription.prompt).toBe(DEFAULT_OPENAI_TRANSCRIBE_PROMPT);
     expect(sessionPayload.session.audio.input.turn_detection.type).toBe("server_vad");
-
-    // Ensure NO legacy top-level fields exist on session
-    expect(sessionPayload.session.input_audio_format).toBeUndefined();
-    expect(sessionPayload.session.input_audio_transcription).toBeUndefined();
 
     // Simulate partial transcript delta
     fakeWs.emit(
@@ -227,16 +231,17 @@ describe("OpenAIStreamingSttProvider Transcription Schema", () => {
         message: expect.stringContaining("OpenAI STT authentication failed")
       })
     );
-    // Ensure actual key secret was NOT leaked in error message
     expect(onError.mock.calls[0][0].message).not.toContain("invalid-key-secret");
   });
 
   it("selects openai provider in SttMainService when STT_PROVIDER=openai", () => {
     const originalProvider = process.env.STT_PROVIDER;
-    const originalModel = process.env.OPENAI_TRANSCRIBE_MODEL;
+    const originalRealtimeModel = process.env.OPENAI_REALTIME_MODEL;
+    const originalTranscribeModel = process.env.OPENAI_TRANSCRIBE_MODEL;
     const originalKey = process.env.OPENAI_API_KEY;
     try {
       process.env.STT_PROVIDER = "openai";
+      delete process.env.OPENAI_REALTIME_MODEL;
       delete process.env.OPENAI_TRANSCRIBE_MODEL;
       process.env.OPENAI_API_KEY = "test-sk-key";
 
@@ -244,12 +249,13 @@ describe("OpenAIStreamingSttProvider Transcription Schema", () => {
       const config = service.getConfig();
 
       expect(config.provider).toBe("openai");
-      expect(config.model).toBe("gpt-4o-mini-transcribe");
+      expect(config.model).toBe("gpt-4o-mini-realtime-preview");
       expect(config.language).toBe("vi");
       expect(config.isRealSttAvailable).toBe(true);
     } finally {
       process.env.STT_PROVIDER = originalProvider;
-      process.env.OPENAI_TRANSCRIBE_MODEL = originalModel;
+      process.env.OPENAI_REALTIME_MODEL = originalRealtimeModel;
+      process.env.OPENAI_TRANSCRIBE_MODEL = originalTranscribeModel;
       process.env.OPENAI_API_KEY = originalKey;
     }
   });

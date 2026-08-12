@@ -5,6 +5,8 @@ import type { SttConfig, SttProviderCallbacks, StreamingSttProvider } from "./ty
 export interface OpenAiSttConfig extends SttConfig {
   provider: "openai";
   apiKey: string;
+  realtimeModel: string;
+  transcribeModel: string;
   sourceSampleRate: 16000;
   targetSampleRate: 24000;
   transcriptionPrompt: string;
@@ -17,11 +19,12 @@ export const DEFAULT_OPENAI_TRANSCRIBE_PROMPT =
 
 export function readOpenAiSttConfig(env: NodeJS.ProcessEnv = process.env): OpenAiSttConfig {
   const apiKey = env.OPENAI_API_KEY?.trim() ?? "";
-  const model = env.OPENAI_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe";
+  const realtimeModel = env.OPENAI_REALTIME_MODEL?.trim() || "gpt-4o-mini-realtime-preview";
+  const transcribeModel = env.OPENAI_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe";
 
   return {
     provider: "openai",
-    model,
+    model: realtimeModel,
     language: "vi",
     sampleRate: 24000,
     channels: 1,
@@ -29,6 +32,8 @@ export function readOpenAiSttConfig(env: NodeJS.ProcessEnv = process.env): OpenA
     isRealSttAvailable: Boolean(apiKey),
     mockMode: env.VITE_USE_MOCK_STT === "true",
     apiKey,
+    realtimeModel,
+    transcribeModel,
     sourceSampleRate: 16000,
     targetSampleRate: 24000,
     transcriptionPrompt: DEFAULT_OPENAI_TRANSCRIBE_PROMPT
@@ -50,7 +55,7 @@ function formatOpenAiErrorMessage(error: { message?: string; type?: string; code
     return "OpenAI STT rate limit or quota exceeded: check OpenAI account billing and limits.";
   }
   if (normalized.includes("404") || normalized.includes("model_not_found")) {
-    return "OpenAI STT model unavailable: check OPENAI_TRANSCRIBE_MODEL parameter.";
+    return "OpenAI STT model unavailable: check OPENAI_REALTIME_MODEL or OPENAI_TRANSCRIBE_MODEL parameter.";
   }
 
   return `OpenAI STT streaming error: ${details}`;
@@ -86,7 +91,7 @@ export class OpenAIStreamingSttProvider implements StreamingSttProvider {
       throw new Error("OpenAI configuration error: OPENAI_API_KEY is missing.");
     }
 
-    const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.config.model)}`;
+    const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.config.realtimeModel)}`;
 
     try {
       const ws = this.createWebSocket(url, {
@@ -97,13 +102,13 @@ export class OpenAIStreamingSttProvider implements StreamingSttProvider {
       this.ws = ws;
 
       ws.on("open", () => {
-        console.log(`[STT] Connected to OpenAI Realtime STT (${this.config.model}, ${this.config.language}).`);
+        console.log(`[STT] Connected to OpenAI Realtime STT (${this.config.realtimeModel} / ${this.config.transcribeModel}, ${this.config.language}).`);
 
-        // Send official transcription-session schema
+        // Send session configuration payload for input audio transcription
         const sessionUpdatePayload = {
           type: "session.update",
           session: {
-            type: "transcription",
+            type: "realtime",
             audio: {
               input: {
                 format: {
@@ -111,7 +116,7 @@ export class OpenAIStreamingSttProvider implements StreamingSttProvider {
                   rate: this.config.targetSampleRate
                 },
                 transcription: {
-                  model: this.config.model,
+                  model: this.config.transcribeModel,
                   language: this.config.language,
                   prompt: this.config.transcriptionPrompt
                 },
