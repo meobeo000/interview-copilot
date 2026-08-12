@@ -84,14 +84,15 @@ export class GeminiAnswerService implements AnswerService {
       }
     };
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.modelName)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey)}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.modelName)}:streamGenerateContent?alt=sse`;
 
     let response: Response;
     try {
       response = await this.fetchFn(endpoint, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "x-goog-api-key": this.apiKey
         },
         body: JSON.stringify(payload),
         signal: request.signal

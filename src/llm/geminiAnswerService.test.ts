@@ -122,13 +122,18 @@ describe("GeminiAnswerService & Provider Factory Integration", () => {
       deltas.push(delta);
     }
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent"),
-      expect.objectContaining({
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      })
-    );
+    const calledUrl = mockFetch.mock.calls[0][0] as string;
+    const calledOptions = mockFetch.mock.calls[0][1] as RequestInit;
+
+    // Verify API key NEVER appears in request URL
+    expect(calledUrl).not.toContain("key=");
+    expect(calledUrl).not.toContain("AIzaSyTestKey");
+
+    // Verify x-goog-api-key header is used
+    expect(calledOptions.headers).toEqual({
+      "Content-Type": "application/json",
+      "x-goog-api-key": "AIzaSyTestKey"
+    });
 
     // Progressive accumulatedText chunk
     expect(deltas.some((d) => d.type === "chunk")).toBe(true);
