@@ -1,4 +1,5 @@
 import type { BrowserWindow } from "electron";
+import { AzureStreamingSttProvider, readAzureSttConfig } from "./stt/azureStreamingSttProvider";
 import { DeepgramStreamingSttProvider } from "./stt/deepgramStreamingSttProvider";
 import { GoogleStreamingSttProvider, readGoogleSttConfig } from "./stt/googleStreamingSttProvider";
 import type { SttConfig, SttProviderName, StreamingSttProvider } from "./stt/types";
@@ -14,11 +15,13 @@ export class SttMainService {
 
   getConfig(): SttConfig {
     const providerName = this.providerName();
-    const config = providerName === "google"
-      ? readGoogleSttConfig()
-      : new DeepgramStreamingSttProvider().getConfig();
-
-    return config;
+    if (providerName === "azure") {
+      return readAzureSttConfig();
+    }
+    if (providerName === "deepgram") {
+      return new DeepgramStreamingSttProvider().getConfig();
+    }
+    return readGoogleSttConfig();
   }
 
   async startSession(window: BrowserWindow): Promise<void> {
@@ -85,13 +88,25 @@ export class SttMainService {
   }
 
   private providerName(): SttProviderName {
-    return process.env.STT_PROVIDER === "deepgram" ? "deepgram" : "google";
+    const providerEnv = process.env.STT_PROVIDER?.trim().toLowerCase();
+    if (providerEnv === "azure") {
+      return "azure";
+    }
+    if (providerEnv === "deepgram") {
+      return "deepgram";
+    }
+    return "google";
   }
 
   private createProvider(): StreamingSttProvider {
-    return this.providerName() === "google"
-      ? new GoogleStreamingSttProvider()
-      : new DeepgramStreamingSttProvider();
+    const providerName = this.providerName();
+    if (providerName === "azure") {
+      return new AzureStreamingSttProvider();
+    }
+    if (providerName === "deepgram") {
+      return new DeepgramStreamingSttProvider();
+    }
+    return new GoogleStreamingSttProvider();
   }
 
   private logConfig(config: SttConfig): void {

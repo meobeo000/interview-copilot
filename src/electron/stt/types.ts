@@ -1,6 +1,6 @@
 import type { Duplex } from "node:stream";
 
-export type SttProviderName = "google" | "deepgram";
+export type SttProviderName = "google" | "deepgram" | "azure";
 
 export interface SttConfig {
   provider: SttProviderName;
@@ -8,7 +8,7 @@ export interface SttConfig {
   language: string;
   sampleRate: 16000;
   channels: 1;
-  encoding: "LINEAR16";
+  encoding: "LINEAR16" | "PCM16";
   isRealSttAvailable: boolean;
   mockMode: boolean;
 }
