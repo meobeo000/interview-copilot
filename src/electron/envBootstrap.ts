@@ -51,7 +51,5 @@ export function logEnvDiagnostics(): void {
 
 export function bootstrapEnv(): void {
   loadEnvFile();
-  if (process.env.NODE_ENV !== "production") {
-    logEnvDiagnostics();
-  }
+  logEnvDiagnostics();
 }
