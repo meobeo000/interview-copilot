@@ -2,6 +2,7 @@ import type { BrowserWindow } from "electron";
 import { AzureStreamingSttProvider, readAzureSttConfig } from "./stt/azureStreamingSttProvider";
 import { DeepgramStreamingSttProvider, readDeepgramSttConfig } from "./stt/deepgramStreamingSttProvider";
 import { GoogleStreamingSttProvider, readGoogleSttConfig } from "./stt/googleStreamingSttProvider";
+import { OpenAIStreamingSttProvider, readOpenAiSttConfig } from "./stt/openAiStreamingSttProvider";
 import type { SttConfig, SttProviderName, StreamingSttProvider } from "./stt/types";
 
 export { SEO_VOCABULARY as SEO_KEYWORDS } from "./stt/googleStreamingSttProvider";
@@ -20,6 +21,9 @@ export class SttMainService {
     }
     if (providerName === "deepgram") {
       return readDeepgramSttConfig();
+    }
+    if (providerName === "openai") {
+      return readOpenAiSttConfig();
     }
     return readGoogleSttConfig();
   }
@@ -95,6 +99,9 @@ export class SttMainService {
     if (providerEnv === "deepgram") {
       return "deepgram";
     }
+    if (providerEnv === "openai") {
+      return "openai";
+    }
     return "google";
   }
 
@@ -106,10 +113,21 @@ export class SttMainService {
     if (providerName === "deepgram") {
       return new DeepgramStreamingSttProvider();
     }
+    if (providerName === "openai") {
+      return new OpenAIStreamingSttProvider();
+    }
     return new GoogleStreamingSttProvider();
   }
 
   private logConfig(config: SttConfig): void {
+    if (config.provider === "openai") {
+      const openAiCfg = config as SttConfig & { sourceSampleRate?: number; targetSampleRate?: number };
+      console.log(
+        `[STT]\nprovider: ${config.provider}\nmodel: ${config.model}\nlanguage: ${config.language}\nsourceSampleRate: ${openAiCfg.sourceSampleRate ?? 16000}\ntargetSampleRate: ${openAiCfg.targetSampleRate ?? 24000}\nchannels: ${config.channels}`
+      );
+      return;
+    }
+
     const keytermConfig = config as SttConfig & { keytermsEnabled?: boolean; keytermList?: readonly string[] };
     const keytermsInfo = typeof keytermConfig.keytermsEnabled === "boolean"
       ? `\nkeytermsEnabled: ${String(keytermConfig.keytermsEnabled)}\nkeytermCount: ${Array.isArray(keytermConfig.keytermList) ? keytermConfig.keytermList.length : 0}`
