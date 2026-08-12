@@ -10,7 +10,6 @@ export interface GroqAnswerConfig {
 export function readGroqAnswerConfig(env: Record<string, string | undefined> = process.env): GroqAnswerConfig {
   const apiKey = env.GROQ_API_KEY?.trim() ?? "";
   const model = env.GROQ_ANSWER_MODEL?.trim() || "llama-3.3-70b-versatile";
-
   return { apiKey, model };
 }
 
@@ -125,7 +124,7 @@ export class GroqAnswerService implements AnswerService {
 
     while (true) {
       if (request.signal?.aborted) {
-        await reader.cancel().catch(() => {});
+        await reader.cancel().catch(() => { });
         throw new Error("Groq request cancelled");
       }
 

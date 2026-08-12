@@ -5,20 +5,31 @@ import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain } from "el
 import { SttMainService } from "./sttMainService";
 
 function loadEnvFile() {
-  const envPath = path.join(__dirname, "../.env");
-  if (fs.existsSync(envPath)) {
-    const content = fs.readFileSync(envPath, "utf-8");
-    content.split(/\r?\n/).forEach((line) => {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith("#")) {
-        const parts = trimmed.split("=");
-        const key = parts[0]?.trim();
-        const value = parts.slice(1).join("=").trim();
-        if (key && !process.env[key]) {
-          process.env[key] = value;
+  const possiblePaths = [
+    path.join(__dirname, "../.env"),
+    path.join(__dirname, ".env"),
+    path.join(process.cwd(), ".env")
+  ];
+
+  for (const envPath of possiblePaths) {
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf-8");
+      content.split(/\r?\n/).forEach((line) => {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith("#")) {
+          const eqIdx = trimmed.indexOf("=");
+          if (eqIdx > 0) {
+            const key = trimmed.slice(0, eqIdx).trim();
+            let value = trimmed.slice(eqIdx + 1).trim();
+            value = value.replace(/^["']|["']$/g, "");
+            if (key && value && (!process.env[key] || process.env[key]?.trim() === "")) {
+              process.env[key] = value;
+            }
+          }
         }
-      }
-    });
+      });
+      break;
+    }
   }
 }
 
