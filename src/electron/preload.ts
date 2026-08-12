@@ -33,8 +33,8 @@ contextBridge.exposeInMainWorld("copilotWindow", {
     generateAnswer: (request: { questionId: string; question: string; rawTranscript: string }) =>
       ipcRenderer.invoke("answer:generate", request),
     cancelAnswer: (questionId?: string) => ipcRenderer.invoke("answer:cancel", questionId),
-    onChunk: (callback: (payload: { questionId: string; deltaText: string; accumulatedText: string }) => void) => {
-      const listener = (_event: unknown, payload: { questionId: string; deltaText: string; accumulatedText: string }) => callback(payload);
+    onChunk: (callback: (payload: { questionId: string; accumulatedText: string }) => void) => {
+      const listener = (_event: unknown, payload: { questionId: string; accumulatedText: string }) => callback(payload);
       ipcRenderer.on("answer:chunk", listener);
       return () => ipcRenderer.removeListener("answer:chunk", listener);
     },

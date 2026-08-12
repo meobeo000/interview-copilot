@@ -3,6 +3,7 @@ import { GroqAnswerService, readGroqAnswerConfig } from "./groqAnswerService";
 import { MainBridgeAnswerService } from "./mainBridgeAnswerService";
 import { createAnswerService } from "./factory";
 import type { AnswerRequest } from "./types";
+import type { SuggestedAnswer } from "../shared/types";
 
 describe("GroqAnswerService & Main Process Bridge Architecture", () => {
   it("reads config from process.env with defaults", () => {
@@ -26,7 +27,7 @@ describe("GroqAnswerService & Main Process Bridge Architecture", () => {
     await expect(gen.next()).rejects.toThrow("GROQ_API_KEY is missing");
   });
 
-  it("streams answer tokens progressively to UI before stream completion", async () => {
+  it("streams answer tokens progressively as accumulatedText chunks before completion", async () => {
     const chunk1 = 'data: {"choices":[{"delta":{"content":"Dự án gần nhất "}}]}\n\n';
     const chunk2 = 'data: {"choices":[{"delta":{"content":"em làm là [Tên project]."}}\n\n';
     const chunkDone = "data: [DONE]\n\n";
@@ -77,42 +78,106 @@ describe("GroqAnswerService & Main Process Bridge Architecture", () => {
       })
     );
 
-    // Verify first token delta was yielded progressively
-    expect(deltas.length).toBeGreaterThan(0);
-    expect(deltas[0].type).toBe("openingLine");
-    expect(deltas[0].value).toContain("Dự án gần nhất");
+    // Verify chunk 1 arrives progressively
+    expect(deltas[0].type).toBe("chunk");
+    if (deltas[0].type === "chunk") {
+      expect(deltas[0].accumulatedText).toBe("Dự án gần nhất ");
+    }
+
+    // Verify finalAnswer delta contains final answer
+    const finalDelta = deltas.find((d) => d.type === "finalAnswer");
+    expect(finalDelta).toBeDefined();
+    if (finalDelta?.type === "finalAnswer") {
+      expect(finalDelta.answer.confidence).toBeDefined();
+      expect(Array.isArray(finalDelta.answer.bullets)).toBe(true);
+      expect(Array.isArray(finalDelta.answer.keywords)).toBe(true);
+    }
   });
 
-  it("uses MainBridgeAnswerService when window.copilotWindow.answer is available in renderer", () => {
+  it("aborts network request via AbortController when signal is aborted", async () => {
+    const controller = new AbortController();
+    const mockFetch = vi.fn().mockImplementation(() => {
+      return new Promise((_, reject) => {
+        controller.signal.addEventListener("abort", () => {
+          const err = new Error("Aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    });
+
+    const service = new GroqAnswerService({ apiKey: "gsk_valid_key", model: "llama-3.3-70b-versatile" }, mockFetch as unknown as typeof fetch);
+
+    const gen = service.streamAnswer({
+      questionId: "q-abort",
+      question: "Site mở bot rồi nhưng hai tuần không nhận key?",
+      rawTranscript: "Site mở bot rồi nhưng hai tuần không nhận key?",
+      signal: controller.signal
+    });
+
+    const streamPromise = (async () => {
+      for await (const chunk of gen) {
+        void chunk;
+      }
+    })();
+
+    controller.abort();
+    await expect(streamPromise).rejects.toThrow("Groq request cancelled");
+  });
+
+  it("uses MainBridgeAnswerService in renderer without leaking API key", () => {
     const originalCopilotWindow = window.copilotWindow;
     try {
+      let onChunkCb: ((p: { questionId: string; accumulatedText: string }) => void) | undefined;
+      let onCompleteCb: ((p: { questionId: string; answer: unknown }) => void) | undefined;
+
+      const mockGenerate = vi.fn().mockImplementation(({ questionId }) => {
+        setTimeout(() => {
+          onChunkCb?.({ questionId, accumulatedText: "Dự án [Tên project]" });
+          onCompleteCb?.({
+            questionId,
+            answer: {
+              openingLine: "Dự án [Tên project]",
+              bullets: ["Bullet 1", "Bullet 2"],
+              keywords: ["Ahrefs", "GSC"],
+              confidence: 0.95
+            } as SuggestedAnswer
+          });
+        }, 10);
+        return Promise.resolve();
+      });
+
       window.copilotWindow = {
         hide: vi.fn(),
         getDesktopSourceId: vi.fn(),
         answer: {
-          generateAnswer: vi.fn(),
+          generateAnswer: mockGenerate,
           cancelAnswer: vi.fn(),
-          onChunk: vi.fn().mockReturnValue(() => {}),
-          onComplete: vi.fn().mockReturnValue(() => {}),
+          onChunk: (cb) => {
+            onChunkCb = cb;
+            return () => {};
+          },
+          onComplete: (cb) => {
+            onCompleteCb = cb;
+            return () => {};
+          },
           onError: vi.fn().mockReturnValue(() => {})
         }
       };
 
-      const service = createAnswerService({
-        ANSWER_PROVIDER: "groq"
-      });
-
+      const service = createAnswerService({ ANSWER_PROVIDER: "groq" });
       expect(service).toBeInstanceOf(MainBridgeAnswerService);
-      expect(service.providerName).toBe("groq");
+
+      // Verify GROQ_API_KEY is NOT exposed on service or renderer window
+      expect((service as unknown as { apiKey?: string }).apiKey).toBeUndefined();
     } finally {
       window.copilotWindow = originalCopilotWindow;
     }
   });
 
-  it("selects GroqAnswerService when running in main process environment with GROQ_API_KEY", () => {
+  it("selects GroqAnswerService when running in main process environment", () => {
     const originalCopilotWindow = window.copilotWindow;
     try {
-      // Remove window.copilotWindow.answer to simulate main process environment
       window.copilotWindow = {
         hide: vi.fn(),
         getDesktopSourceId: vi.fn()

@@ -87,9 +87,13 @@ export class GroqAnswerService implements AnswerService {
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: request.signal
       });
     } catch (err) {
+      if (request.signal?.aborted) {
+        throw new Error("Groq request cancelled");
+      }
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Groq connection error: ${msg.replace(this.apiKey, "[REDACTED]")}`);
     }
@@ -120,6 +124,11 @@ export class GroqAnswerService implements AnswerService {
     let buffer = "";
 
     while (true) {
+      if (request.signal?.aborted) {
+        await reader.cancel().catch(() => {});
+        throw new Error("Groq request cancelled");
+      }
+
       const { done, value } = await reader.read();
       if (done) {
         break;
@@ -154,8 +163,8 @@ export class GroqAnswerService implements AnswerService {
               if (visibleTTFA === undefined && accumulatedText.trim()) {
                 visibleTTFA = Date.now() - startTime;
               }
-              // Progressively stream text to UI
-              yield { type: "openingLine", value: accumulatedText };
+              // Yield progressive accumulatedText chunk
+              yield { type: "chunk", accumulatedText };
             }
           } catch {
             // Ignore partial SSE tokens
@@ -178,13 +187,8 @@ export class GroqAnswerService implements AnswerService {
 
     const finalAnswer = parseAnswerJson(accumulatedText);
 
-    // Yield final normalized structured answer
-    yield { type: "openingLine", value: finalAnswer.openingLine };
-    for (const bullet of finalAnswer.bullets) {
-      yield { type: "bullet", value: bullet };
-    }
-    yield { type: "keywords", value: finalAnswer.keywords };
-    yield { type: "confidence", value: finalAnswer.confidence ?? 0.95 };
+    // Yield final structured answer payload
+    yield { type: "finalAnswer", answer: finalAnswer };
 
     return finalAnswer;
   }

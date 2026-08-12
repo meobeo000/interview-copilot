@@ -1,6 +1,8 @@
 import type { ConversationItem, SuggestedAnswer } from "../shared/types";
 
 export type AnswerDelta =
+  | { type: "chunk"; accumulatedText: string }
+  | { type: "finalAnswer"; answer: SuggestedAnswer }
   | { type: "openingLine"; value: string }
   | { type: "bullet"; value: string }
   | { type: "keywords"; value: string[] }
@@ -11,6 +13,7 @@ export interface AnswerRequest {
   question: string;
   rawTranscript: string;
   recentHistory?: ConversationItem[];
+  signal?: AbortSignal;
 }
 
 export interface AnswerService {

@@ -6,7 +6,7 @@ type GlobalWindow = {
     answer?: {
       generateAnswer: (req: { questionId: string; question: string; rawTranscript: string }) => Promise<void>;
       cancelAnswer: (questionId?: string) => Promise<void>;
-      onChunk: (cb: (payload: { questionId: string; deltaText: string; accumulatedText: string }) => void) => () => void;
+      onChunk: (cb: (payload: { questionId: string; accumulatedText: string }) => void) => () => void;
       onComplete: (cb: (payload: { questionId: string; answer: unknown }) => void) => () => void;
       onError: (cb: (payload: { questionId: string; error: string }) => void) => () => void;
     };
@@ -45,15 +45,16 @@ export class MainBridgeAnswerService implements AnswerService {
       }
     };
 
-    const cleanupChunk = answerApi.onChunk((payload: { questionId: string; deltaText: string; accumulatedText: string }) => {
+    const cleanupChunk = answerApi.onChunk((payload: { questionId: string; accumulatedText: string }) => {
       if (payload.questionId === request.questionId) {
-        pushDelta({ type: "openingLine", value: payload.accumulatedText });
+        pushDelta({ type: "chunk", accumulatedText: payload.accumulatedText });
       }
     });
 
     const cleanupComplete = answerApi.onComplete((payload: { questionId: string; answer: unknown }) => {
       if (payload.questionId === request.questionId) {
         const finalAns = payload.answer as SuggestedAnswer;
+        pushDelta({ type: "finalAnswer", answer: finalAns });
         resolveCompleted(finalAns);
         if (notifyNext) {
           const cb = notifyNext;
@@ -74,6 +75,14 @@ export class MainBridgeAnswerService implements AnswerService {
       }
     });
 
+    const abortHandler = () => {
+      answerApi.cancelAnswer(request.questionId);
+    };
+
+    if (request.signal) {
+      request.signal.addEventListener("abort", abortHandler, { once: true });
+    }
+
     try {
       void answerApi.generateAnswer({
         questionId: request.questionId,
@@ -93,6 +102,9 @@ export class MainBridgeAnswerService implements AnswerService {
         });
 
       while (!isDone || pendingDeltas.length > 0) {
+        if (request.signal?.aborted) {
+          throw new Error("Answer request cancelled");
+        }
         if (pendingDeltas.length > 0) {
           const delta = pendingDeltas.shift()!;
           yield delta;
@@ -104,15 +116,11 @@ export class MainBridgeAnswerService implements AnswerService {
       }
 
       const res = await completionPromise;
-      yield { type: "openingLine", value: res.openingLine };
-      for (const bullet of res.bullets) {
-        yield { type: "bullet", value: bullet };
-      }
-      yield { type: "keywords", value: res.keywords };
-      yield { type: "confidence", value: res.confidence ?? 0.95 };
-
       return res;
     } finally {
+      if (request.signal) {
+        request.signal.removeEventListener("abort", abortHandler);
+      }
       cleanupChunk();
       cleanupComplete();
       cleanupError();

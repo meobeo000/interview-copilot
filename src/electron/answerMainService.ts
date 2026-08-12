@@ -6,48 +6,63 @@ import type { SuggestedAnswer } from "../shared/types";
 export class AnswerMainService {
   private activeAnswerService: AnswerService | undefined;
   private activeQuestionId: string | undefined;
+  private activeAbortController: AbortController | undefined;
 
   async generateAnswer(window: BrowserWindow, request: AnswerRequest): Promise<void> {
+    // 1. If an active generation is in flight, abort it cleanly via AbortController
+    if (this.activeAbortController) {
+      this.activeAbortController.abort();
+      this.activeAbortController = undefined;
+    }
+
     this.activeQuestionId = request.questionId;
+    this.activeAbortController = new AbortController();
     this.activeAnswerService = createAnswerService(process.env);
 
-    let accumulatedText = "";
     let finalAnswer: SuggestedAnswer | undefined;
+    let lastAccumulatedText = "";
 
     try {
-      const generator = this.activeAnswerService.streamAnswer(request);
+      const generator = this.activeAnswerService.streamAnswer({
+        ...request,
+        signal: this.activeAbortController.signal
+      });
 
       for await (const delta of generator) {
-        if (this.activeQuestionId !== request.questionId) {
-          // Cancelled or superseded by a new question request
+        if (this.activeQuestionId !== request.questionId || this.activeAbortController.signal.aborted) {
           break;
         }
 
-        if (delta.type === "openingLine") {
-          accumulatedText = delta.value;
+        if (delta.type === "chunk") {
+          lastAccumulatedText = delta.accumulatedText;
           window.webContents.send("answer:chunk", {
             questionId: request.questionId,
-            deltaText: delta.value,
-            accumulatedText
+            accumulatedText: delta.accumulatedText
           });
+        } else if (delta.type === "finalAnswer") {
+          finalAnswer = delta.answer;
         }
       }
 
-      if (this.activeQuestionId === request.questionId) {
-        // Complete event with normalized structured answer
-        finalAnswer = {
-          openingLine: accumulatedText || "Em xin trả lời câu hỏi của anh như sau:",
+      // 2. Ensure real normalized final answer survives IPC completion
+      if (this.activeQuestionId === request.questionId && !this.activeAbortController.signal.aborted) {
+        const payloadAnswer: SuggestedAnswer = finalAnswer || {
+          openingLine: lastAccumulatedText || "Em xin trả lời câu hỏi của anh như sau:",
           bullets: [],
-          keywords: ["SEO", "Strategy"],
-          confidence: 0.95
+          keywords: ["SEO"],
+          confidence: 0.9
         };
 
         window.webContents.send("answer:complete", {
           questionId: request.questionId,
-          answer: finalAnswer
+          answer: payloadAnswer
         });
       }
     } catch (error) {
+      if (this.activeAbortController?.signal.aborted) {
+        // Quietly exit on clean cancellation
+        return;
+      }
       const errorMsg = error instanceof Error ? error.message : String(error);
       if (this.activeQuestionId === request.questionId) {
         window.webContents.send("answer:error", {
@@ -58,6 +73,7 @@ export class AnswerMainService {
     } finally {
       if (this.activeQuestionId === request.questionId) {
         this.activeQuestionId = undefined;
+        this.activeAbortController = undefined;
         this.activeAnswerService = undefined;
       }
     }
@@ -65,6 +81,10 @@ export class AnswerMainService {
 
   cancelAnswer(questionId?: string): void {
     if (!questionId || this.activeQuestionId === questionId) {
+      if (this.activeAbortController) {
+        this.activeAbortController.abort();
+        this.activeAbortController = undefined;
+      }
       this.activeQuestionId = undefined;
       this.activeAnswerService = undefined;
     }

@@ -8,7 +8,9 @@ export class MockAnswerService implements AnswerService {
   readonly modelName = "mock-model";
 
   async *streamAnswer(request: AnswerRequest): AsyncGenerator<AnswerDelta, SuggestedAnswer, void> {
-    void request.recentHistory;
+    if (request.signal?.aborted) {
+      throw new Error("Mock answer cancelled");
+    }
 
     const answer: SuggestedAnswer = {
       openingLine:
@@ -26,16 +28,21 @@ export class MockAnswerService implements AnswerService {
     };
 
     await sleep(20);
+    yield { type: "chunk", accumulatedText: answer.openingLine };
     yield { type: "openingLine", value: answer.openingLine };
 
     for (const bullet of answer.bullets) {
       await sleep(20);
+      if (request.signal?.aborted) {
+        throw new Error("Mock answer cancelled");
+      }
       yield { type: "bullet", value: bullet };
     }
 
     await sleep(20);
     yield { type: "keywords", value: answer.keywords };
     yield { type: "confidence", value: answer.confidence ?? 0.9 };
+    yield { type: "finalAnswer", answer };
 
     return answer;
   }

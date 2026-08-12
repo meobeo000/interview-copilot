@@ -39,6 +39,20 @@ function writeHistory(items: ConversationItem[]) {
 }
 
 function applyDelta(answer: SuggestedAnswer, delta: AnswerDelta): SuggestedAnswer {
+  if (delta.type === "chunk") {
+    return { ...answer, streamingText: delta.accumulatedText };
+  }
+
+  if (delta.type === "finalAnswer") {
+    return {
+      openingLine: delta.answer.openingLine,
+      bullets: delta.answer.bullets,
+      keywords: delta.answer.keywords,
+      confidence: delta.answer.confidence,
+      streamingText: undefined
+    };
+  }
+
   if (delta.type === "openingLine") {
     return { ...answer, openingLine: delta.value };
   }
