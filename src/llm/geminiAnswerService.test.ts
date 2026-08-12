@@ -7,12 +7,11 @@ import { bootstrapEnv } from "../electron/envBootstrap";
 describe("GeminiAnswerService & Provider Factory Integration", () => {
   it("reads config from env with configurable default model", () => {
     const config = readGeminiAnswerConfig({
-      GEMINI_API_KEY: "AIzaSyTestKey123",
-      GEMINI_ANSWER_MODEL: "gemini-2.5-flash"
+      GEMINI_API_KEY: "AIzaSyTestKey123"
     });
 
     expect(config.apiKey).toBe("AIzaSyTestKey123");
-    expect(config.model).toBe("gemini-2.5-flash");
+    expect(config.model).toBe("gemini-flash-latest");
   });
 
   it("differentiates missing configuration error cleanly", async () => {

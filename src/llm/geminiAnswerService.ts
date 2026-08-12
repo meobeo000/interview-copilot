@@ -8,8 +8,8 @@ export interface GeminiAnswerConfig {
 }
 
 export function readGeminiAnswerConfig(env: Record<string, string | undefined> = process.env): GeminiAnswerConfig {
-  const apiKey = env.GEMINI_API_KEY?.trim() ?? "";
-  const model = env.GEMINI_ANSWER_MODEL?.trim() || "gemini-2.5-flash";
+  const apiKey = (env.GEMINI_API_KEY || process.env.GEMINI_API_KEY)?.trim() ?? "";
+  const model = (env.GEMINI_ANSWER_MODEL || process.env.GEMINI_ANSWER_MODEL)?.trim() || "gemini-flash-latest";
 
   return { apiKey, model };
 }

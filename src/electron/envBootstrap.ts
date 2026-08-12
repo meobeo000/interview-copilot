@@ -19,7 +19,7 @@ export function loadEnvFile(): void {
             const key = trimmed.slice(0, eqIdx).trim();
             let value = trimmed.slice(eqIdx + 1).trim();
             value = value.replace(/^["']|["']$/g, "");
-            if (key && value && (!process.env[key] || process.env[key]?.trim() === "")) {
+            if (key && value) {
               process.env[key] = value;
             }
           }
@@ -36,7 +36,7 @@ export function logEnvDiagnostics(): void {
   const deepgramKey = process.env.DEEPGRAM_API_KEY?.trim();
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
   const groqKey = process.env.GROQ_API_KEY?.trim();
-  const geminiModel = process.env.GEMINI_ANSWER_MODEL?.trim() || "gemini-2.5-flash";
+  const geminiModel = process.env.GEMINI_ANSWER_MODEL?.trim() || "gemini-flash-latest";
 
   console.log("[ENV]");
   console.log(`STT_PROVIDER=${sttProvider}`);
