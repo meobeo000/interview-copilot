@@ -1,6 +1,6 @@
 import type { BrowserWindow } from "electron";
 import { AzureStreamingSttProvider, readAzureSttConfig } from "./stt/azureStreamingSttProvider";
-import { DeepgramStreamingSttProvider } from "./stt/deepgramStreamingSttProvider";
+import { DeepgramStreamingSttProvider, readDeepgramSttConfig } from "./stt/deepgramStreamingSttProvider";
 import { GoogleStreamingSttProvider, readGoogleSttConfig } from "./stt/googleStreamingSttProvider";
 import type { SttConfig, SttProviderName, StreamingSttProvider } from "./stt/types";
 
@@ -19,7 +19,7 @@ export class SttMainService {
       return readAzureSttConfig();
     }
     if (providerName === "deepgram") {
-      return new DeepgramStreamingSttProvider().getConfig();
+      return readDeepgramSttConfig();
     }
     return readGoogleSttConfig();
   }
@@ -111,7 +111,7 @@ export class SttMainService {
 
   private logConfig(config: SttConfig): void {
     console.log(
-      `[STT]\nprovider: ${config.provider}\nmodel: ${config.model}\nlanguage: ${config.language}\nsampleRate: ${config.sampleRate}\nchannels: ${config.channels}\nencoding: ${config.encoding}`
+      `[STT]\nprovider: ${config.provider}\nmodel: ${config.model}\nlanguage: ${config.language}\nsampleRate: ${config.sampleRate}\nchannels: ${config.channels}\nencoding: ${config.encoding.toLowerCase()}`
     );
   }
 }
