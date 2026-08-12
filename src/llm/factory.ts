@@ -1,3 +1,4 @@
+import { GeminiAnswerService, readGeminiAnswerConfig } from "./geminiAnswerService";
 import { GroqAnswerService, readGroqAnswerConfig } from "./groqAnswerService";
 import { MainBridgeAnswerService } from "./mainBridgeAnswerService";
 import { MockAnswerService } from "./mockAnswerService";
@@ -17,12 +18,18 @@ export function createAnswerService(env: Record<string, string | undefined> = pr
     return new MainBridgeAnswerService();
   }
 
-  const provider = env.ANSWER_PROVIDER?.trim().toLowerCase() || (env.NODE_ENV === "test" ? "mock" : "groq");
+  const provider = env.ANSWER_PROVIDER?.trim().toLowerCase() || (env.NODE_ENV === "test" ? "mock" : "gemini");
 
   if (provider === "mock") {
     return new MockAnswerService();
   }
 
-  const groqConfig = readGroqAnswerConfig(env);
-  return new GroqAnswerService(groqConfig);
+  if (provider === "groq") {
+    const groqConfig = readGroqAnswerConfig(env);
+    return new GroqAnswerService(groqConfig);
+  }
+
+  // Default provider: gemini
+  const geminiConfig = readGeminiAnswerConfig(env);
+  return new GeminiAnswerService(geminiConfig);
 }
