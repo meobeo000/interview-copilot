@@ -64,6 +64,46 @@ describe("ContextAwareTranscriptCorrector", () => {
     expect(result.changes).toHaveLength(0);
   });
 
+  it("PROTECTS FALSE POSITIVE: 'em xây sai cấu trúc site' must NOT be converted to site", () => {
+    const input = "em xây sai cấu trúc site";
+    const result = corrector.correct(input);
+
+    expect(result.correctedText).toBe("em xây sai cấu trúc site");
+    expect(result.changes).toHaveLength(0);
+  });
+
+  it("PROTECTS FALSE POSITIVE: 'em chạy sai campaign' must NOT be converted to site", () => {
+    const input = "em chạy sai campaign";
+    const result = corrector.correct(input);
+
+    expect(result.correctedText).toBe("em chạy sai campaign");
+    expect(result.changes).toHaveLength(0);
+  });
+
+  it("PROTECTS FALSE POSITIVE: 'em mở sai trang' must NOT be converted to site", () => {
+    const input = "em mở sai trang";
+    const result = corrector.correct(input);
+
+    expect(result.correctedText).toBe("em mở sai trang");
+    expect(result.changes).toHaveLength(0);
+  });
+
+  it("PROTECTS FALSE POSITIVE: 'em chọn sai domain' must NOT be converted to site", () => {
+    const input = "em chọn sai domain";
+    const result = corrector.correct(input);
+
+    expect(result.correctedText).toBe("em chọn sai domain");
+    expect(result.changes).toHaveLength(0);
+  });
+
+  it("PROTECTS FALSE POSITIVE: 'em setup sai canonical' must NOT be converted to site", () => {
+    const input = "em setup sai canonical";
+    const result = corrector.correct(input);
+
+    expect(result.correctedText).toBe("em setup sai canonical");
+    expect(result.changes).toHaveLength(0);
+  });
+
   it("PROTECTS FALSE POSITIVE: 'sai canonical', 'sai cấu hình', 'sai dữ liệu' must NOT be converted to site", () => {
     const inputs = [
       "sai canonical",

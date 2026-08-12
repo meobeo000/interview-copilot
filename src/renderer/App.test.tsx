@@ -247,4 +247,55 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
     expect(history[0].rawTranscript).toBe("Câu hỏi 2: Em đánh giá backlink spam bằng cách nào?");
     expect(history[1].rawTranscript).toBe("Câu hỏi 1: Em xử lý canonical tag bị lỗi như thế nào?");
   });
+
+  it("REGRESSION TEST: preserves rawTranscript and correctedTranscript independently across multi-turn answer streaming", async () => {
+    let partialCb: ((text: string) => void) | undefined;
+    window.copilotWindow = {
+      hide: vi.fn(),
+      getDesktopSourceId: vi.fn(),
+      stt: {
+        startSession: vi.fn().mockResolvedValue(undefined),
+        sendAudioFrame: vi.fn(),
+        stopSession: vi.fn().mockResolvedValue(undefined),
+        getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
+        onPartial: (cb) => {
+          partialCb = cb;
+          return () => {};
+        },
+        onFinal: () => () => {},
+        onError: () => () => {}
+      }
+    };
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /listen/i }));
+
+    // Q1
+    act(() => {
+      partialCb?.("Em giới thiệu dự án SEO gần nhất?");
+    });
+    // Trigger Q1 finalization and start answer streaming
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500);
+    });
+
+    expect(useCopilotStore.getState().status).toBe("Answering");
+
+    // While Q1 is answering, STT produces raw speech for Q2 containing "nhận sai"
+    act(() => {
+      partialCb?.("Em nói cho anh từ lúc nhận sai đến lúc keyword lên như thế nào?");
+    });
+
+    // Wait for Q1 answer to complete + Q2 candidate pause (~1200ms) + grace window (~1800ms) + Q2 answer commit (~5000ms)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15000);
+    });
+
+    const history = useCopilotStore.getState().history;
+    expect(history.length).toBeGreaterThanOrEqual(2);
+
+    const q2 = history[0];
+    expect(q2.rawTranscript).toBe("Em nói cho anh từ lúc nhận sai đến lúc keyword lên như thế nào?");
+    expect(q2.correctedTranscript).toBe("Em nói cho anh từ lúc nhận site đến lúc keyword lên như thế nào?");
+  });
 });

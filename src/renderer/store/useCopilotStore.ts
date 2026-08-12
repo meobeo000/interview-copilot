@@ -103,7 +103,8 @@ let activeTranscriptService:
 let transcriptController: StreamController | undefined;
 let activeItem: ConversationItem | undefined;
 let graceWindowTimer: number | undefined;
-let rawLiveTranscript = "";
+let rawTurnSpeechBuffer = "";
+let correctedTurnSpeechBuffer = "";
 
 function clearGraceWindow() {
   if (graceWindowTimer !== undefined) {
@@ -117,18 +118,18 @@ function handleTranscriptUpdate(
   set: (partial: Partial<CopilotState>) => void,
   get: () => CopilotState
 ) {
-  rawLiveTranscript = rawText;
+  rawTurnSpeechBuffer = rawText;
   const correctionResult = corrector.correct(rawText, { domain: "seo_igaming_interview" });
-  const correctedText = correctionResult.correctedText;
+  correctedTurnSpeechBuffer = correctionResult.correctedText;
 
   const currentStatus = get().status;
 
   // Speech resumed during Grace Window: reopen candidate question and append speech
   if (currentStatus === "FinalizingQuestion" || currentStatus === "PossibleEnd") {
     clearGraceWindow();
-    set({ status: "Listening", liveTranscript: correctedText });
+    set({ status: "Listening", liveTranscript: correctedTurnSpeechBuffer });
   } else {
-    set({ liveTranscript: correctedText });
+    set({ liveTranscript: correctedTurnSpeechBuffer });
   }
 
   // While answering, accumulate speech for next turn without triggering turn detection
@@ -136,8 +137,20 @@ function handleTranscriptUpdate(
     return;
   }
 
+  evaluateAccumulatedTurn(set, get);
+}
+
+function evaluateAccumulatedTurn(
+  set: (partial: Partial<CopilotState>) => void,
+  get: () => CopilotState
+) {
+  const currentStatus = get().status;
+  if (currentStatus === "Answering" || !correctedTurnSpeechBuffer.trim()) {
+    return;
+  }
+
   smartDetector.updateTurn(
-    correctedText,
+    correctedTurnSpeechBuffer,
     () => {
       if (get().status === "Listening") {
         set({ status: "PossibleEnd" });
@@ -179,8 +192,9 @@ function commitQuestion(
     return;
   }
 
-  const rawText = rawLiveTranscript.trim() || correctedText;
-  rawLiveTranscript = "";
+  const rawText = rawTurnSpeechBuffer.trim() || correctedText;
+  rawTurnSpeechBuffer = "";
+  correctedTurnSpeechBuffer = "";
 
   // 1. Reset smart detector
   smartDetector.reset();
@@ -261,9 +275,8 @@ async function streamAnswerForItem(
   set({ status: "Listening", history });
 
   // Evaluate any speech collected during answer streaming for the next turn
-  const accumulatedTurnSpeech = get().liveTranscript.trim();
-  if (accumulatedTurnSpeech) {
-    handleTranscriptUpdate(accumulatedTurnSpeech, set, get);
+  if (correctedTurnSpeechBuffer.trim()) {
+    evaluateAccumulatedTurn(set, get);
   }
 }
 
@@ -285,7 +298,8 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     smartDetector.reset();
 
     activeItem = undefined;
-    rawLiveTranscript = "";
+    rawTurnSpeechBuffer = "";
+    correctedTurnSpeechBuffer = "";
 
     set({
       status: "Listening",
@@ -352,6 +366,8 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     transcriptController?.stop();
     transcriptController = undefined;
     activeTranscriptService = undefined;
+    rawTurnSpeechBuffer = "";
+    correctedTurnSpeechBuffer = "";
     void audioCapture.stop();
     set({ status: "Idle", audioLevel: 0 });
   },
