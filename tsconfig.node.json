@@ -8,8 +8,14 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "dist-electron",
+    "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src/electron/**/*.ts"],
-  "exclude": ["src/electron/**/*.test.ts"]
+  "include": ["src/electron/**/*.ts", "src/llm/**/*.ts", "src/shared/**/*.ts"],
+  "exclude": [
+    "src/electron/**/*.test.ts",
+    "src/llm/**/*.test.ts",
+    "src/shared/**/*.test.ts",
+    "src/**/__mocks__/**"
+  ]
 }

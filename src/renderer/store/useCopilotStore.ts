@@ -3,7 +3,7 @@ import { MockAudioCapture } from "../../audio/mockAudioCapture";
 import { SystemAudioCapture } from "../../audio/systemAudioCapture";
 import type { AudioCapture, AudioFrame } from "../../audio/types";
 import { ContextAwareTranscriptCorrector } from "../../corrector/contextAwareCorrector";
-import { createAnswerService } from "../../llm/factory";
+import { createAnswerService } from "../../llm/factory.browser";
 import type { AnswerDelta } from "../../llm/types";
 import { SmartQuestionDetector } from "../../question-detector/smartQuestionDetector";
 import { capHistory } from "../../shared/history";

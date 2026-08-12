@@ -3,12 +3,18 @@ import path from "node:path";
 
 export function loadEnvFile(): void {
   const possiblePaths = [
+    path.join(__dirname, "../../.env"),
     path.join(__dirname, "../.env"),
     path.join(__dirname, ".env"),
     path.join(process.cwd(), ".env")
   ];
 
+  console.log("[ENV-BOOTSTRAP] __dirname:", __dirname);
+  console.log("[ENV-BOOTSTRAP] cwd:", process.cwd());
+
+  let loaded = false;
   for (const envPath of possiblePaths) {
+    console.log("[ENV-BOOTSTRAP] Checking:", envPath, "exists:", fs.existsSync(envPath));
     if (fs.existsSync(envPath)) {
       const content = fs.readFileSync(envPath, "utf-8");
       content.split(/\r?\n/).forEach((line) => {
@@ -25,8 +31,14 @@ export function loadEnvFile(): void {
           }
         }
       });
+      loaded = true;
+      console.log("[ENV-BOOTSTRAP] Loaded from:", envPath);
       break;
     }
+  }
+
+  if (!loaded) {
+    console.warn("[ENV-BOOTSTRAP] WARNING: No .env file found! Checked:", possiblePaths);
   }
 }
 

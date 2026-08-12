@@ -3,6 +3,62 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { useCopilotStore } from "./store/useCopilotStore";
 
+// ---------------------------------------------------------------------------
+// Helper: build a mock copilotWindow.answer that completes quickly
+// ---------------------------------------------------------------------------
+function makeMockAnswerBridge() {
+  type ChunkCb = (payload: { questionId: string; accumulatedText: string }) => void;
+  type CompleteCb = (payload: { questionId: string; answer: unknown }) => void;
+  type ErrorCb = (payload: { questionId: string; error: string }) => void;
+
+  const chunkCbs = new Set<ChunkCb>();
+  const completeCbs = new Set<CompleteCb>();
+  const errorCbs = new Set<ErrorCb>();
+
+  const generateAnswer = vi.fn(async (req: { questionId: string }) => {
+    const { questionId } = req;
+    // Fire a chunk immediately, but complete after a long delay (10s)
+    // so the "Answering" status is observable at 3050ms in the multi-turn test
+    Promise.resolve().then(() => {
+      chunkCbs.forEach(cb => cb({ questionId, accumulatedText: "Mock answer in progress" }));
+    });
+    await new Promise(resolve => setTimeout(resolve, 4_000));
+    const answer = { openingLine: "Mock opening", bullets: ["b1"], keywords: ["k1"] };
+    completeCbs.forEach(cb => cb({ questionId, answer }));
+  });
+
+  return {
+    generateAnswer,
+    cancelAnswer: vi.fn(async () => {}),
+    onChunk: vi.fn((cb: ChunkCb) => { chunkCbs.add(cb); return () => { chunkCbs.delete(cb); }; }),
+    onComplete: vi.fn((cb: CompleteCb) => { completeCbs.add(cb); return () => { completeCbs.delete(cb); }; }),
+    onError: vi.fn((cb: ErrorCb) => { errorCbs.add(cb); return () => { errorCbs.delete(cb); }; })
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Helper: build a full mock copilotWindow with stt + answer
+// ---------------------------------------------------------------------------
+function makeMockCopilotWindow(onPartial: (cb: (text: string) => void) => void) {
+  return {
+    hide: vi.fn(),
+    getDesktopSourceId: vi.fn(),
+    stt: {
+      startSession: vi.fn().mockResolvedValue(undefined),
+      sendAudioFrame: vi.fn(),
+      stopSession: vi.fn().mockResolvedValue(undefined),
+      getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
+      onPartial: (cb: (text: string) => void) => {
+        onPartial(cb);
+        return () => {};
+      },
+      onFinal: () => () => {},
+      onError: () => () => {}
+    },
+    answer: makeMockAnswerBridge()
+  };
+}
+
 describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => {
   beforeEach(() => {
     vi.stubEnv("VITE_USE_MOCK_STT", "false");
@@ -33,22 +89,7 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
   // REGRESSION TEST: 6-segment ChatGPT Voice interview scenario
   it("REGRESSION TEST: combines 6 speech segments with natural pauses into EXACTLY ONE Question and History item", async () => {
     let partialCb: ((text: string) => void) | undefined;
-    window.copilotWindow = {
-      hide: vi.fn(),
-      getDesktopSourceId: vi.fn(),
-      stt: {
-        startSession: vi.fn().mockResolvedValue(undefined),
-        sendAudioFrame: vi.fn(),
-        stopSession: vi.fn().mockResolvedValue(undefined),
-        getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
-        onPartial: (cb) => {
-          partialCb = cb;
-          return () => {};
-        },
-        onFinal: () => () => {},
-        onError: () => () => {}
-      }
-    };
+    window.copilotWindow = makeMockCopilotWindow(cb => { partialCb = cb; });
 
     render(<App />);
 
@@ -113,22 +154,7 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
 
   it("reopens turn if speech resumes during Grace Window", async () => {
     let partialCb: ((text: string) => void) | undefined;
-    window.copilotWindow = {
-      hide: vi.fn(),
-      getDesktopSourceId: vi.fn(),
-      stt: {
-        startSession: vi.fn().mockResolvedValue(undefined),
-        sendAudioFrame: vi.fn(),
-        stopSession: vi.fn().mockResolvedValue(undefined),
-        getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
-        onPartial: (cb) => {
-          partialCb = cb;
-          return () => {};
-        },
-        onFinal: () => () => {},
-        onError: () => () => {}
-      }
-    };
+    window.copilotWindow = makeMockCopilotWindow(cb => { partialCb = cb; });
 
     render(<App />);
 
@@ -164,22 +190,7 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
 
   it("bypasses Grace Window and finalizes immediately on Alt+Enter", async () => {
     let partialCb: ((text: string) => void) | undefined;
-    window.copilotWindow = {
-      hide: vi.fn(),
-      getDesktopSourceId: vi.fn(),
-      stt: {
-        startSession: vi.fn().mockResolvedValue(undefined),
-        sendAudioFrame: vi.fn(),
-        stopSession: vi.fn().mockResolvedValue(undefined),
-        getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
-        onPartial: (cb) => {
-          partialCb = cb;
-          return () => {};
-        },
-        onFinal: () => () => {},
-        onError: () => () => {}
-      }
-    };
+    window.copilotWindow = makeMockCopilotWindow(cb => { partialCb = cb; });
 
     render(<App />);
 
@@ -201,22 +212,7 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
 
   it("isolates two genuinely separate questions into two distinct history items", async () => {
     let partialCb: ((text: string) => void) | undefined;
-    window.copilotWindow = {
-      hide: vi.fn(),
-      getDesktopSourceId: vi.fn(),
-      stt: {
-        startSession: vi.fn().mockResolvedValue(undefined),
-        sendAudioFrame: vi.fn(),
-        stopSession: vi.fn().mockResolvedValue(undefined),
-        getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
-        onPartial: (cb) => {
-          partialCb = cb;
-          return () => {};
-        },
-        onFinal: () => () => {},
-        onError: () => () => {}
-      }
-    };
+    window.copilotWindow = makeMockCopilotWindow(cb => { partialCb = cb; });
 
     render(<App />);
 
@@ -250,22 +246,7 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
 
   it("REGRESSION TEST: preserves rawTranscript and correctedTranscript independently across multi-turn answer streaming", async () => {
     let partialCb: ((text: string) => void) | undefined;
-    window.copilotWindow = {
-      hide: vi.fn(),
-      getDesktopSourceId: vi.fn(),
-      stt: {
-        startSession: vi.fn().mockResolvedValue(undefined),
-        sendAudioFrame: vi.fn(),
-        stopSession: vi.fn().mockResolvedValue(undefined),
-        getConfig: vi.fn().mockResolvedValue({ provider: "deepgram", isRealSttAvailable: true, mockMode: false }),
-        onPartial: (cb) => {
-          partialCb = cb;
-          return () => {};
-        },
-        onFinal: () => () => {},
-        onError: () => () => {}
-      }
-    };
+    window.copilotWindow = makeMockCopilotWindow(cb => { partialCb = cb; });
 
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /listen/i }));

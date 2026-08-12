@@ -16,7 +16,7 @@ function rendererUrl(): string {
     return process.env.VITE_DEV_SERVER_URL;
   }
 
-  return pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
+  return pathToFileURL(path.join(__dirname, "../../dist/index.html")).href;
 }
 
 function createWindow() {
@@ -40,6 +40,10 @@ function createWindow() {
   });
 
   mainWindow.setAlwaysOnTop(true, "screen-saver");
+
+  mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    console.log(`[RENDERER ${level}] ${message} (${sourceId}:${line})`);
+  });
 
   mainWindow.webContents.on("did-fail-load", () => {
     if (process.env.VITE_DEV_SERVER_URL) {
