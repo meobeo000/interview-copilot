@@ -90,7 +90,7 @@ export class RealStreamingSTTService implements TranscriptionService {
         frame.data.byteOffset,
         frame.data.byteOffset + frame.data.byteLength
       ) as ArrayBuffer;
-      sendFn(arrayBuffer);
+      sendFn(arrayBuffer, frame.capturedAt);
     }
   }
 }

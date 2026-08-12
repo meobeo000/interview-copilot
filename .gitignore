@@ -9,3 +9,11 @@ coverage/
 .env
 .env.local
 .env.*.local
+!.env.example
+
+# Google Cloud credentials and private key material
+service-account*.json
+*-service-account*.json
+google-credentials*.json
+*.p12
+*.pem

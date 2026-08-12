@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld("copilotWindow", {
   },
   stt: {
     startSession: () => ipcRenderer.invoke("stt:start"),
-    sendAudioFrame: (buffer: ArrayBuffer) => ipcRenderer.send("stt:send-audio-frame", buffer),
+    sendAudioFrame: (buffer: ArrayBuffer, capturedAt: number) => ipcRenderer.send("stt:send-audio-frame", buffer, capturedAt),
     stopSession: () => ipcRenderer.invoke("stt:stop"),
     getConfig: () => ipcRenderer.invoke("stt:get-config"),
     onPartial: (callback: (text: string) => void) => {
