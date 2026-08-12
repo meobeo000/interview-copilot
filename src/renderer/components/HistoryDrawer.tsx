@@ -61,6 +61,13 @@ export function HistoryDrawer({ isOpen, history, onClose }: HistoryDrawerProps) 
                 <p className="detail-text bold">{selectedItem.cleanedQuestion ?? selectedItem.rawTranscript}</p>
               </div>
 
+              {selectedItem.correctedTranscript && selectedItem.correctedTranscript !== selectedItem.rawTranscript ? (
+                <div className="detail-section">
+                  <h4>Corrected Speech Transcript</h4>
+                  <p className="detail-text bold">{selectedItem.correctedTranscript}</p>
+                </div>
+              ) : null}
+
               <div className="detail-section">
                 <h4>Raw Speech Transcript</h4>
                 <p className="detail-text muted">{selectedItem.rawTranscript}</p>

@@ -13,6 +13,7 @@ export interface ConversationItem {
   startedAt: number;
   completedAt?: number;
   rawTranscript: string;
+  correctedTranscript?: string;
   cleanedQuestion?: string;
   detectedTopic?: string;
   questionConfidence?: number;

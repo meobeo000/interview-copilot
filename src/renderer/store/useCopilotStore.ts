@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { MockAudioCapture } from "../../audio/mockAudioCapture";
 import { SystemAudioCapture } from "../../audio/systemAudioCapture";
 import type { AudioCapture, AudioFrame } from "../../audio/types";
+import { ContextAwareTranscriptCorrector } from "../../corrector/contextAwareCorrector";
 import { MockAnswerService } from "../../llm/mockAnswerService";
 import type { AnswerDelta } from "../../llm/types";
 import { SmartQuestionDetector } from "../../question-detector/smartQuestionDetector";
@@ -94,6 +95,7 @@ interface CopilotState {
 const answerService = new MockAnswerService();
 const audioCapture = createAudioCapture();
 const smartDetector = new SmartQuestionDetector();
+const corrector = new ContextAwareTranscriptCorrector();
 
 let activeTranscriptService:
   | (TranscriptionService & { sendAudio?: (frame: AudioFrame) => void; resetTurn?: () => void })
@@ -101,6 +103,7 @@ let activeTranscriptService:
 let transcriptController: StreamController | undefined;
 let activeItem: ConversationItem | undefined;
 let graceWindowTimer: number | undefined;
+let rawLiveTranscript = "";
 
 function clearGraceWindow() {
   if (graceWindowTimer !== undefined) {
@@ -110,18 +113,22 @@ function clearGraceWindow() {
 }
 
 function handleTranscriptUpdate(
-  text: string,
+  rawText: string,
   set: (partial: Partial<CopilotState>) => void,
   get: () => CopilotState
 ) {
+  rawLiveTranscript = rawText;
+  const correctionResult = corrector.correct(rawText, { domain: "seo_igaming_interview" });
+  const correctedText = correctionResult.correctedText;
+
   const currentStatus = get().status;
 
   // Speech resumed during Grace Window: reopen candidate question and append speech
   if (currentStatus === "FinalizingQuestion" || currentStatus === "PossibleEnd") {
     clearGraceWindow();
-    set({ status: "Listening", liveTranscript: text });
+    set({ status: "Listening", liveTranscript: correctedText });
   } else {
-    set({ liveTranscript: text });
+    set({ liveTranscript: correctedText });
   }
 
   // While answering, accumulate speech for next turn without triggering turn detection
@@ -130,7 +137,7 @@ function handleTranscriptUpdate(
   }
 
   smartDetector.updateTurn(
-    text,
+    correctedText,
     () => {
       if (get().status === "Listening") {
         set({ status: "PossibleEnd" });
@@ -167,10 +174,13 @@ function commitQuestion(
   get: () => CopilotState
 ) {
   clearGraceWindow();
-  const text = questionText.trim();
-  if (!text) {
+  const correctedText = questionText.trim();
+  if (!correctedText) {
     return;
   }
+
+  const rawText = rawLiveTranscript.trim() || correctedText;
+  rawLiveTranscript = "";
 
   // 1. Reset smart detector
   smartDetector.reset();
@@ -189,8 +199,9 @@ function commitQuestion(
   const newItem: ConversationItem = {
     id: crypto.randomUUID(),
     startedAt: Date.now(),
-    rawTranscript: text,
-    cleanedQuestion: text,
+    rawTranscript: rawText,
+    correctedTranscript: correctedText,
+    cleanedQuestion: correctedText,
     detectedTopic: "Vietnamese SEO Question"
   };
   activeItem = newItem;
@@ -274,6 +285,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     smartDetector.reset();
 
     activeItem = undefined;
+    rawLiveTranscript = "";
 
     set({
       status: "Listening",
