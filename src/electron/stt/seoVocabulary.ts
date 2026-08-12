@@ -34,3 +34,34 @@ export const SEO_VOCABULARY = [
   "sports betting",
   "iGaming"
 ] as const;
+
+export const DEEPGRAM_KEYTERMS = [
+  "site",
+  "iGaming",
+  "keyword",
+  "GSC",
+  "GA4",
+  "Ahrefs",
+  "Core Update",
+  "PBN",
+  "Guest Post",
+  "Entity",
+  "backlink",
+  "referring domain",
+  "anchor text",
+  "expired domain",
+  "301 redirect",
+  "canonical",
+  "indexing",
+  "search intent",
+  "internal link",
+  "organic traffic",
+  "money site",
+  "negative SEO",
+  "disavow",
+  "Wayback",
+  "casino",
+  "betting",
+  "sports betting"
+] as const;
+

@@ -110,8 +110,12 @@ export class SttMainService {
   }
 
   private logConfig(config: SttConfig): void {
+    const keytermConfig = config as SttConfig & { keytermsEnabled?: boolean; keytermList?: readonly string[] };
+    const keytermsInfo = typeof keytermConfig.keytermsEnabled === "boolean"
+      ? `\nkeytermsEnabled: ${String(keytermConfig.keytermsEnabled)}\nkeytermCount: ${Array.isArray(keytermConfig.keytermList) ? keytermConfig.keytermList.length : 0}`
+      : "";
     console.log(
-      `[STT]\nprovider: ${config.provider}\nmodel: ${config.model}\nlanguage: ${config.language}\nsampleRate: ${config.sampleRate}\nchannels: ${config.channels}\nencoding: ${config.encoding.toLowerCase()}`
+      `[STT]\nprovider: ${config.provider}\nmodel: ${config.model}\nlanguage: ${config.language}${keytermsInfo}\nsampleRate: ${config.sampleRate}\nchannels: ${config.channels}\nencoding: ${config.encoding.toLowerCase()}`
     );
   }
 }
