@@ -27,6 +27,7 @@ export interface SuggestedAnswer {
   bullets: string[];
   keywords: string[];
   confidence?: number;
+  streamingText?: string;
 }
 
 export interface QuestionDetectionResult {

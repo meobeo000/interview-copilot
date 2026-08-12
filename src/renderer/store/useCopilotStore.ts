@@ -245,6 +245,7 @@ async function streamAnswerForItem(
     detectedTopic: item.detectedTopic ?? "SEO Question"
   });
 
+  let hasError = false;
   try {
     const generator = answerService.streamAnswer({
       questionId: item.id,
@@ -262,6 +263,7 @@ async function streamAnswerForItem(
       set({ answer: nextAnswer });
     }
   } catch (error) {
+    hasError = true;
     const errorMsg = error instanceof Error ? error.message : String(error);
     if (activeItem?.id === item.id) {
       set({
@@ -269,6 +271,14 @@ async function streamAnswerForItem(
         error: `Answer generation failed: ${errorMsg}`
       });
     }
+  }
+
+  if (hasError) {
+    // Do NOT write an empty successful answer item to history on error!
+    if (correctedTurnSpeechBuffer.trim()) {
+      evaluateAccumulatedTurn(set, get);
+    }
+    return;
   }
 
   const completed: ConversationItem = {

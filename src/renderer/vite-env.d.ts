@@ -14,5 +14,12 @@ interface Window {
       onFinal: (callback: (text: string) => void) => () => void;
       onError: (callback: (error: string) => void) => () => void;
     };
+    answer?: {
+      generateAnswer: (request: { questionId: string; question: string; rawTranscript: string }) => Promise<void>;
+      cancelAnswer: (questionId?: string) => Promise<void>;
+      onChunk: (callback: (payload: { questionId: string; deltaText: string; accumulatedText: string }) => void) => () => void;
+      onComplete: (callback: (payload: { questionId: string; answer: unknown }) => void) => () => void;
+      onError: (callback: (payload: { questionId: string; error: string }) => void) => () => void;
+    };
   };
 }

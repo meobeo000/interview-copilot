@@ -24,8 +24,11 @@ function loadEnvFile() {
 
 loadEnvFile();
 
+import { AnswerMainService } from "./answerMainService";
+
 let mainWindow: BrowserWindow | undefined;
 const sttMainService = new SttMainService();
+const answerMainService = new AnswerMainService();
 
 function rendererUrl(): string {
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -120,6 +123,16 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("stt:get-config", () => sttMainService.getConfig());
+
+  ipcMain.handle("answer:generate", async (_event, request: { questionId: string; question: string; rawTranscript: string }) => {
+    if (mainWindow) {
+      await answerMainService.generateAnswer(mainWindow, request);
+    }
+  });
+
+  ipcMain.handle("answer:cancel", (_event, questionId?: string) => {
+    answerMainService.cancelAnswer(questionId);
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

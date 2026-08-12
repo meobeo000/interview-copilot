@@ -1,7 +1,7 @@
 import type { AnswerDelta, AnswerRequest, AnswerService } from "./types";
 import type { SuggestedAnswer } from "../shared/types";
 
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class MockAnswerService implements AnswerService {
   readonly providerName = "mock";

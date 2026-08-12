@@ -28,5 +28,25 @@ contextBridge.exposeInMainWorld("copilotWindow", {
       ipcRenderer.on("stt:error", listener);
       return () => ipcRenderer.removeListener("stt:error", listener);
     }
+  },
+  answer: {
+    generateAnswer: (request: { questionId: string; question: string; rawTranscript: string }) =>
+      ipcRenderer.invoke("answer:generate", request),
+    cancelAnswer: (questionId?: string) => ipcRenderer.invoke("answer:cancel", questionId),
+    onChunk: (callback: (payload: { questionId: string; deltaText: string; accumulatedText: string }) => void) => {
+      const listener = (_event: unknown, payload: { questionId: string; deltaText: string; accumulatedText: string }) => callback(payload);
+      ipcRenderer.on("answer:chunk", listener);
+      return () => ipcRenderer.removeListener("answer:chunk", listener);
+    },
+    onComplete: (callback: (payload: { questionId: string; answer: unknown }) => void) => {
+      const listener = (_event: unknown, payload: { questionId: string; answer: unknown }) => callback(payload);
+      ipcRenderer.on("answer:complete", listener);
+      return () => ipcRenderer.removeListener("answer:complete", listener);
+    },
+    onError: (callback: (payload: { questionId: string; error: string }) => void) => {
+      const listener = (_event: unknown, payload: { questionId: string; error: string }) => callback(payload);
+      ipcRenderer.on("answer:error", listener);
+      return () => ipcRenderer.removeListener("answer:error", listener);
+    }
   }
 });

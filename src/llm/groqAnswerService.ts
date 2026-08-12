@@ -65,7 +65,8 @@ export class GroqAnswerService implements AnswerService {
     }
 
     const startTime = Date.now();
-    let firstTokenTime: number | undefined;
+    let networkTTFT: number | undefined;
+    let visibleTTFA: number | undefined;
 
     const payload = {
       model: this.modelName,
@@ -124,8 +125,8 @@ export class GroqAnswerService implements AnswerService {
         break;
       }
 
-      if (firstTokenTime === undefined) {
-        firstTokenTime = Date.now();
+      if (networkTTFT === undefined) {
+        networkTTFT = Date.now() - startTime;
       }
 
       buffer += decoder.decode(value, { stream: true });
@@ -150,6 +151,11 @@ export class GroqAnswerService implements AnswerService {
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) {
               accumulatedText += content;
+              if (visibleTTFA === undefined && accumulatedText.trim()) {
+                visibleTTFA = Date.now() - startTime;
+              }
+              // Progressively stream text to UI
+              yield { type: "openingLine", value: accumulatedText };
             }
           } catch {
             // Ignore partial SSE tokens
@@ -159,20 +165,20 @@ export class GroqAnswerService implements AnswerService {
     }
 
     const totalTime = Date.now() - startTime;
-    const ttft = firstTokenTime ? firstTokenTime - startTime : totalTime;
 
     if (process.env.NODE_ENV !== "production") {
       console.log(`[ANSWER]`);
       console.log(`questionId: ${request.questionId}`);
       console.log(`provider: ${this.providerName}`);
       console.log(`model: ${this.modelName}`);
-      console.log(`timeToFirstToken: ${ttft} ms`);
+      console.log(`networkTTFT: ${networkTTFT ?? totalTime} ms`);
+      console.log(`visibleTTFA: ${visibleTTFA ?? totalTime} ms`);
       console.log(`totalGenerationTime: ${totalTime} ms`);
     }
 
     const finalAnswer = parseAnswerJson(accumulatedText);
 
-    // Yield progressive chunks
+    // Yield final normalized structured answer
     yield { type: "openingLine", value: finalAnswer.openingLine };
     for (const bullet of finalAnswer.bullets) {
       yield { type: "bullet", value: bullet };

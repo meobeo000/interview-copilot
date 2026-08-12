@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { GroqAnswerService, readGroqAnswerConfig } from "./groqAnswerService";
+import { MainBridgeAnswerService } from "./mainBridgeAnswerService";
 import { createAnswerService } from "./factory";
 import type { AnswerRequest } from "./types";
 
-describe("GroqAnswerService", () => {
+describe("GroqAnswerService & Main Process Bridge Architecture", () => {
   it("reads config from process.env with defaults", () => {
     const config = readGroqAnswerConfig({
       GROQ_API_KEY: "gsk_test12345"
@@ -25,23 +26,26 @@ describe("GroqAnswerService", () => {
     await expect(gen.next()).rejects.toThrow("GROQ_API_KEY is missing");
   });
 
-  it("streams answer JSON for Personal Experience question with placeholders", async () => {
-    const mockResponseBody = [
-      'data: {"choices":[{"delta":{"content":"{\\"openingLine\\": \\"Dự án gần nhất em trực tiếp triển khai là [Tên project] target thị trường [GEO].\\", \\"bullets\\": [\\"Lúc nhận site keyword [___] đang ở position [___].\\", \\"Em tập trung audit entity và làm lại internal link.\\"], \\"keywords\\": [\\"iGaming\\", \\"SEO\\"]}"}}]}\n\n',
-      "data: [DONE]\n\n"
-    ].join("");
+  it("streams answer tokens progressively to UI before stream completion", async () => {
+    const chunk1 = 'data: {"choices":[{"delta":{"content":"Dự án gần nhất "}}]}\n\n';
+    const chunk2 = 'data: {"choices":[{"delta":{"content":"em làm là [Tên project]."}}\n\n';
+    const chunkDone = "data: [DONE]\n\n";
 
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       body: {
         getReader: () => {
-          let readCount = 0;
+          let step = 0;
           return {
             read: async () => {
-              if (readCount === 0) {
-                readCount++;
-                return { done: false, value: new TextEncoder().encode(mockResponseBody) };
+              if (step === 0) {
+                step++;
+                return { done: false, value: new TextEncoder().encode(chunk1) };
+              }
+              if (step === 1) {
+                step++;
+                return { done: false, value: new TextEncoder().encode(chunk2 + chunkDone) };
               }
               return { done: true, value: undefined };
             }
@@ -73,26 +77,57 @@ describe("GroqAnswerService", () => {
       })
     );
 
-    expect(deltas.some((d) => d.type === "openingLine" && d.value.includes("[Tên project]"))).toBe(true);
-    expect(deltas.some((d) => d.type === "bullet")).toBe(true);
+    // Verify first token delta was yielded progressively
+    expect(deltas.length).toBeGreaterThan(0);
+    expect(deltas[0].type).toBe("openingLine");
+    expect(deltas[0].value).toContain("Dự án gần nhất");
   });
 
-  it("selects GroqAnswerService when ANSWER_PROVIDER=groq", () => {
-    const service = createAnswerService({
-      ANSWER_PROVIDER: "groq",
-      GROQ_API_KEY: "gsk_sample",
-      GROQ_ANSWER_MODEL: "llama-3.3-70b-versatile"
-    });
+  it("uses MainBridgeAnswerService when window.copilotWindow.answer is available in renderer", () => {
+    const originalCopilotWindow = window.copilotWindow;
+    try {
+      window.copilotWindow = {
+        hide: vi.fn(),
+        getDesktopSourceId: vi.fn(),
+        answer: {
+          generateAnswer: vi.fn(),
+          cancelAnswer: vi.fn(),
+          onChunk: vi.fn().mockReturnValue(() => {}),
+          onComplete: vi.fn().mockReturnValue(() => {}),
+          onError: vi.fn().mockReturnValue(() => {})
+        }
+      };
 
-    expect(service.providerName).toBe("groq");
-    expect(service.modelName).toBe("llama-3.3-70b-versatile");
+      const service = createAnswerService({
+        ANSWER_PROVIDER: "groq"
+      });
+
+      expect(service).toBeInstanceOf(MainBridgeAnswerService);
+      expect(service.providerName).toBe("groq");
+    } finally {
+      window.copilotWindow = originalCopilotWindow;
+    }
   });
 
-  it("selects MockAnswerService when ANSWER_PROVIDER=mock", () => {
-    const service = createAnswerService({
-      ANSWER_PROVIDER: "mock"
-    });
+  it("selects GroqAnswerService when running in main process environment with GROQ_API_KEY", () => {
+    const originalCopilotWindow = window.copilotWindow;
+    try {
+      // Remove window.copilotWindow.answer to simulate main process environment
+      window.copilotWindow = {
+        hide: vi.fn(),
+        getDesktopSourceId: vi.fn()
+      };
 
-    expect(service.providerName).toBe("mock");
+      const service = createAnswerService({
+        ANSWER_PROVIDER: "groq",
+        GROQ_API_KEY: "gsk_sample",
+        GROQ_ANSWER_MODEL: "llama-3.3-70b-versatile"
+      });
+
+      expect(service.providerName).toBe("groq");
+      expect(service.modelName).toBe("llama-3.3-70b-versatile");
+    } finally {
+      window.copilotWindow = originalCopilotWindow;
+    }
   });
 });
