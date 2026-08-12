@@ -111,8 +111,8 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.on("stt:send-audio-frame", (_event, buffer: ArrayBuffer) => {
-    sttMainService.sendAudioFrame(buffer);
+  ipcMain.on("stt:send-audio-frame", (_event, buffer: ArrayBuffer, capturedAt?: number) => {
+    sttMainService.sendAudioFrame(buffer, capturedAt);
   });
 
   ipcMain.handle("stt:stop", async () => {

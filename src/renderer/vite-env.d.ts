@@ -7,7 +7,7 @@ interface Window {
     onAnswerNow?: (callback: () => void) => () => void;
     stt?: {
       startSession: () => Promise<void>;
-      sendAudioFrame: (buffer: ArrayBuffer) => void;
+      sendAudioFrame: (buffer: ArrayBuffer, capturedAt: number) => void;
       stopSession: () => Promise<void>;
       getConfig: () => Promise<{ provider: string; isRealSttAvailable: boolean; mockMode: boolean }>;
       onPartial: (callback: (text: string) => void) => () => void;
