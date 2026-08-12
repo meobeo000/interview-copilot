@@ -92,9 +92,9 @@ describe("OpenAIStreamingSttProvider Transcription Schema", () => {
     expect(mockFactory).toHaveBeenCalled();
     expect(requestedUrl).toBe("wss://api.openai.com/v1/realtime?model=gpt-4o-mini-transcribe");
     expect(requestedOptions?.headers).toEqual({
-      Authorization: "Bearer sk-mock-key",
-      "OpenAI-Beta": "realtime=v1"
+      Authorization: "Bearer sk-mock-key"
     });
+    expect(requestedOptions?.headers?.["OpenAI-Beta"]).toBeUndefined();
 
     // Verify session.update message sent
     expect(fakeWs.sentData.length).toBeGreaterThanOrEqual(1);

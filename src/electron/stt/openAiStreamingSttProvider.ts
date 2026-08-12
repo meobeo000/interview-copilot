@@ -91,8 +91,7 @@ export class OpenAIStreamingSttProvider implements StreamingSttProvider {
     try {
       const ws = this.createWebSocket(url, {
         headers: {
-          Authorization: `Bearer ${this.config.apiKey}`,
-          "OpenAI-Beta": "realtime=v1"
+          Authorization: `Bearer ${this.config.apiKey}`
         }
       });
       this.ws = ws;
