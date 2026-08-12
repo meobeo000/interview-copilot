@@ -18,6 +18,8 @@ export interface ConversationItem {
   detectedTopic?: string;
   questionConfidence?: number;
   answer?: SuggestedAnswer;
+  answerProvider?: string;
+  answerModel?: string;
 }
 
 export interface SuggestedAnswer {

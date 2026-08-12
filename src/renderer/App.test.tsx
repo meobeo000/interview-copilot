@@ -276,7 +276,7 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
     });
     // Trigger Q1 finalization and start answer streaming
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3500);
+      await vi.advanceTimersByTimeAsync(3050);
     });
 
     expect(useCopilotStore.getState().status).toBe("Answering");

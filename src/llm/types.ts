@@ -7,11 +7,20 @@ export type AnswerDelta =
   | { type: "confidence"; value: number };
 
 export interface AnswerRequest {
+  questionId: string;
   question: string;
   rawTranscript: string;
-  recentHistory: ConversationItem[];
+  recentHistory?: ConversationItem[];
 }
 
 export interface AnswerService {
+  providerName: string;
+  modelName: string;
   streamAnswer: (request: AnswerRequest) => AsyncGenerator<AnswerDelta, SuggestedAnswer, void>;
+}
+
+export interface AnswerServiceConfig {
+  provider: "groq" | "mock";
+  apiKey: string;
+  model: string;
 }

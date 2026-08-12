@@ -4,6 +4,9 @@ import type { SuggestedAnswer } from "../shared/types";
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export class MockAnswerService implements AnswerService {
+  readonly providerName = "mock";
+  readonly modelName = "mock-model";
+
   async *streamAnswer(request: AnswerRequest): AsyncGenerator<AnswerDelta, SuggestedAnswer, void> {
     void request.recentHistory;
 
@@ -22,15 +25,15 @@ export class MockAnswerService implements AnswerService {
       confidence: 0.9
     };
 
-    await sleep(420);
+    await sleep(20);
     yield { type: "openingLine", value: answer.openingLine };
 
     for (const bullet of answer.bullets) {
-      await sleep(520);
+      await sleep(20);
       yield { type: "bullet", value: bullet };
     }
 
-    await sleep(360);
+    await sleep(20);
     yield { type: "keywords", value: answer.keywords };
     yield { type: "confidence", value: answer.confidence ?? 0.9 };
 

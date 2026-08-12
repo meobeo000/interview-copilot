@@ -3,7 +3,7 @@ import { MockAudioCapture } from "../../audio/mockAudioCapture";
 import { SystemAudioCapture } from "../../audio/systemAudioCapture";
 import type { AudioCapture, AudioFrame } from "../../audio/types";
 import { ContextAwareTranscriptCorrector } from "../../corrector/contextAwareCorrector";
-import { MockAnswerService } from "../../llm/mockAnswerService";
+import { createAnswerService } from "../../llm/factory";
 import type { AnswerDelta } from "../../llm/types";
 import { SmartQuestionDetector } from "../../question-detector/smartQuestionDetector";
 import { capHistory } from "../../shared/history";
@@ -92,7 +92,7 @@ interface CopilotState {
   hideOverlay: () => Promise<void>;
 }
 
-const answerService = new MockAnswerService();
+const answerService = createAnswerService();
 const audioCapture = createAudioCapture();
 const smartDetector = new SmartQuestionDetector();
 const corrector = new ContextAwareTranscriptCorrector();
@@ -216,7 +216,9 @@ function commitQuestion(
     rawTranscript: rawText,
     correctedTranscript: correctedText,
     cleanedQuestion: correctedText,
-    detectedTopic: "Vietnamese SEO Question"
+    detectedTopic: "Vietnamese SEO Question",
+    answerProvider: answerService.providerName,
+    answerModel: answerService.modelName
   };
   activeItem = newItem;
 
@@ -243,20 +245,37 @@ async function streamAnswerForItem(
     detectedTopic: item.detectedTopic ?? "SEO Question"
   });
 
-  for await (const delta of answerService.streamAnswer({
-    question: item.cleanedQuestion ?? item.rawTranscript,
-    rawTranscript: item.rawTranscript,
-    recentHistory: get().history.slice(0, 5)
-  })) {
-    nextAnswer = applyDelta(nextAnswer, delta);
-    set({ answer: nextAnswer });
+  try {
+    const generator = answerService.streamAnswer({
+      questionId: item.id,
+      question: item.cleanedQuestion ?? item.rawTranscript,
+      rawTranscript: item.rawTranscript,
+      recentHistory: get().history.slice(0, 5)
+    });
+
+    for await (const delta of generator) {
+      // Ownership check: if activeItem changed to a new question during streaming, do not overwrite state with stale chunks!
+      if (activeItem?.id !== item.id) {
+        break;
+      }
+      nextAnswer = applyDelta(nextAnswer, delta);
+      set({ answer: nextAnswer });
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    if (activeItem?.id === item.id) {
+      set({
+        status: "Error",
+        error: `Answer generation failed: ${errorMsg}`
+      });
+    }
   }
 
   const completed: ConversationItem = {
     ...item,
-    answer: nextAnswer
+    answer: nextAnswer,
+    completedAt: Date.now()
   };
-  activeItem = completed;
 
   const currentHistory = get().history;
   const existingIndex = currentHistory.findIndex((h) => h.id === completed.id);
@@ -271,8 +290,13 @@ async function streamAnswerForItem(
   const history = capHistory(nextHistory);
   writeHistory(history);
 
-  // Transition back to Listening state
-  set({ status: "Listening", history });
+  if (activeItem?.id === item.id) {
+    activeItem = completed;
+    // Transition back to Listening state if no error
+    if (get().status === "Answering") {
+      set({ status: "Listening", history });
+    }
+  }
 
   // Evaluate any speech collected during answer streaming for the next turn
   if (correctedTurnSpeechBuffer.trim()) {
