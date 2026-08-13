@@ -272,6 +272,75 @@ details p {
   color: rgba(238, 245, 242, 0.55);
 }
 
+.answer-content {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.answer-content ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+}
+
+.answer-content li {
+  margin-bottom: 6px;
+  line-height: 1.48;
+}
+
+.keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.keyword-chip {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(125, 182, 255, 0.14);
+  color: #7db6ff;
+  border: 1px solid rgba(125, 182, 255, 0.3);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+
+.answer-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.loading-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #7db6ff;
+  animation: pulse-dot 1.2s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+.loading-text {
+  margin: 0;
+  color: #7db6ff;
+  font-style: italic;
+}
+
 .error-banner {
   border-radius: 8px;
   background: rgba(255, 120, 111, 0.15);

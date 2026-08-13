@@ -1,6 +1,11 @@
 import type { SuggestedAnswer } from "../../shared/types";
 
-export function AnswerPanel({ answer }: { answer: SuggestedAnswer }) {
+interface AnswerPanelProps {
+  answer: SuggestedAnswer;
+  isAnswering?: boolean;
+}
+
+export function AnswerPanel({ answer, isAnswering = false }: AnswerPanelProps) {
   const hasAnswer =
     Boolean(answer.streamingText) ||
     Boolean(answer.openingLine) ||
@@ -27,12 +32,19 @@ export function AnswerPanel({ answer }: { answer: SuggestedAnswer }) {
               {answer.keywords.length > 0 ? (
                 <div className="keywords">
                   {answer.keywords.map((keyword, idx) => (
-                    <span key={idx}>{keyword}</span>
+                    <span key={idx} className="keyword-chip">
+                      {keyword}
+                    </span>
                   ))}
                 </div>
               ) : null}
             </>
           )}
+        </div>
+      ) : isAnswering ? (
+        <div className="answer-loading">
+          <span className="loading-dot" />
+          <p className="placeholder loading-text">Đang suy nghĩ gợi ý trả lời...</p>
         </div>
       ) : (
         <p className="placeholder">Gợi ý trả lời sẽ xuất hiện từng phần sau khi phát hiện câu hỏi.</p>
@@ -40,3 +52,4 @@ export function AnswerPanel({ answer }: { answer: SuggestedAnswer }) {
     </section>
   );
 }
+

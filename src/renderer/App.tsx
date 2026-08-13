@@ -128,7 +128,7 @@ export function App() {
               topic={detectedTopic}
               confidence={questionConfidence}
             />
-            <AnswerPanel answer={answer} />
+            <AnswerPanel answer={answer} isAnswering={status === "Answering"} />
           </>
         ) : null}
       </div>
