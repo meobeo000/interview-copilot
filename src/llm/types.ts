@@ -12,6 +12,7 @@ export interface AnswerRequest {
   questionId: string;
   question: string;
   rawTranscript: string;
+  questionCommittedAt?: number;
   recentHistory?: ConversationItem[];
   signal?: AbortSignal;
 }

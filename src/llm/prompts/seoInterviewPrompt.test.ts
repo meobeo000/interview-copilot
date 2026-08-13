@@ -1,23 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { SEO_INTERVIEW_SYSTEM_PROMPT } from "./seoInterviewPrompt";
 
-describe("SEO Interview System Prompt Guidelines & Structure", () => {
-  it("defines live interview copilot role and spoken target characteristics", () => {
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("You are a live interview copilot for a Vietnamese SEO candidate");
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("iGaming / Sports Betting SEO position");
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("concise spoken interview answer");
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("This is NOT:");
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("- an SEO tutorial");
+describe("SEO Interview System Prompt Behavioral Requirements & Constraints", () => {
+  it("maintains strict line count budget (50-80 target, under 80 lines)", () => {
+    const lines = SEO_INTERVIEW_SYSTEM_PROMPT.split("\n").length;
+    expect(lines).toBeGreaterThanOrEqual(25);
+    expect(lines).toBeLessThanOrEqual(80);
   });
 
-  it("enforces natural candidate Vietnamese speech patterns ('em', 'anh')", () => {
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain('Đầu tiên em sẽ...');
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain('Em ưu tiên...');
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain('Avoid:');
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain('Theo lý thuyết SEO...');
+  it("defines copilot role and natural spoken candidate tone ('em', 'anh')", () => {
+    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("live interview copilot");
+    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("SAY OUT LOUD");
+    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain('"em"');
+    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain('"anh"');
   });
 
-  it("specifies standard English SEO terminology whitelist", () => {
+  it("whitelists standard English SEO industry terms", () => {
     const requiredTerms = [
       "GSC", "GA4", "Ahrefs", "keyword", "ranking", "traffic", "indexing",
       "canonical", "crawl", "bot", "on-page", "internal link", "backlink",
@@ -29,13 +27,13 @@ describe("SEO Interview System Prompt Guidelines & Structure", () => {
     }
   });
 
-  it("configures glanceability target (80-140 words, max 5 bullets)", () => {
+  it("enforces output constraints: 80-140 words, max 4 bullets, max 5 keywords", () => {
     expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("80-140 Vietnamese words");
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Maximum 5 short, practical and speakable points.");
-    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Maximum 6 genuinely useful SEO terms");
+    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("max 4 concise");
+    expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("maximum 5");
   });
 
-  it("defines 5 internal classification modes", () => {
+  it("contains all 5 core question mode behaviors", () => {
     expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("PERSONAL_EXPERIENCE");
     expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("STRATEGY");
     expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("DIAGNOSTIC");
@@ -43,42 +41,36 @@ describe("SEO Interview System Prompt Guidelines & Structure", () => {
     expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("FOLLOW_UP");
   });
 
-  describe("REGRESSION TESTS (Prompt-level rule enforcement)", () => {
-    it("1. Personal Experience: 'Dự án gần nhất em làm top là con nào?' enforces placeholders when context is absent", () => {
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Dự án gần nhất em làm là [TÊN SITE]");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("NEVER invent facts");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Never invent: UU88, 20 triệu, Top 3");
+  describe("Behavioral Rules Enforcement", () => {
+    it("enforces Personal Experience no-fabrication rule & short placeholders for unknown personal facts", () => {
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Never fabricate candidate facts");
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("[TÊN SITE]");
     });
 
-    it("2. Strategy & Budget: 'Anh cho em budget 20 triệu thì em chia thế nào?' allows concrete allocations and forbids [BUDGET] placeholder when value is given", () => {
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Budget 20 triệu em chia thế nào?");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Với 20 triệu, em sẽ dành khoảng 5 triệu content");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Do NOT output placeholders like [BUDGET] when budget was given in the question");
+    it("enforces Strategy concrete numbers rule without placeholders when budget is given", () => {
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("STRATEGY");
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("numerical allocations");
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("do NOT output placeholders like [BUDGET]");
     });
 
-    it("3. Diagnostic: 'Site mở bot hai tuần chưa nhận key thì sao?' focuses on diagnosis and next actions", () => {
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Site mở bot hai tuần vẫn không nhận key thì em làm sao?");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Answer specifically about diagnosing a site that is not receiving keyword signals");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Do NOT start explaining unrelated Core Update recovery");
+    it("enforces Diagnostic evidence-based reasoning rule", () => {
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("DIAGNOSTIC");
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Reason directly from evidence");
     });
 
-    it("4. Decision: 'Domain A DR55 traffic 0, B DR20 có traffic thật. Chọn con nào?' enforces taking a position first", () => {
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("TAKE A POSITION FIRST");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Case này em nghiêng về domain B");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Do not hide behind: \"Còn tùy nhiều yếu tố.\"");
+    it("enforces Decision position-first rule", () => {
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("DECISION");
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Take a clear position first");
     });
 
-    it("5. Diagnostic Numbers: 'Impressions giảm 5%, click giảm 40%, position 3.2 xuống 6.8.' enforces reasoning from provided data", () => {
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Impression giảm 5%, click giảm 40%, position từ 3.2 xuống 6.8.");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Recognize indexation/demand probably did not collapse, but ranking/CTR deteriorated materially");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Use the actual numbers from the interviewer");
+    it("enforces Follow-up concise prior-context answer rule", () => {
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("FOLLOW_UP");
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("1-2 sentence");
     });
 
-    it("6. Follow-up: 'Tại sao?' requires concise answers using prior context", () => {
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Short questions should receive short answers");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain('"Tại sao?"');
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Use the previous question/context if available");
-      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Do not generate another complete SEO strategy");
+    it("enforces preservation of interviewer-supplied data", () => {
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Interviewer Data");
+      expect(SEO_INTERVIEW_SYSTEM_PROMPT).toContain("Never replace supplied data with placeholders");
     });
   });
 });

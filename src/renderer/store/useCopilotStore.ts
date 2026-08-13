@@ -265,6 +265,7 @@ async function streamAnswerForItem(
       questionId: item.id,
       question: item.cleanedQuestion ?? item.rawTranscript,
       rawTranscript: item.rawTranscript,
+      questionCommittedAt: item.startedAt,
       recentHistory: get().history.slice(0, 5)
     });
 

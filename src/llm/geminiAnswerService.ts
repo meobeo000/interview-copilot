@@ -64,9 +64,10 @@ export class GeminiAnswerService implements AnswerService {
       throw new Error("Gemini Answer configuration error: GEMINI_API_KEY is missing. Check .env file.");
     }
 
-    const startTime = Date.now();
+    const questionCommittedAt = request.questionCommittedAt ?? Date.now();
     let networkTTFT: number | undefined;
     let visibleTTFA: number | undefined;
+    let answerCompletedAt: number | undefined;
 
     const payload = {
       system_instruction: {
@@ -80,11 +81,14 @@ export class GeminiAnswerService implements AnswerService {
       ],
       generationConfig: {
         temperature: 0.3,
+        maxOutputTokens: 600,
         responseMimeType: "application/json"
       }
     };
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.modelName)}:streamGenerateContent?alt=sse`;
+
+    const geminiRequestStartedAt = Date.now();
 
     let response: Response;
     try {
@@ -153,11 +157,12 @@ export class GeminiAnswerService implements AnswerService {
 
       const { done, value } = await reader.read();
       if (done) {
+        answerCompletedAt = Date.now();
         break;
       }
 
       if (networkTTFT === undefined) {
-        networkTTFT = Date.now() - startTime;
+        networkTTFT = Date.now() - geminiRequestStartedAt;
       }
 
       buffer += decoder.decode(value, { stream: true });
@@ -186,7 +191,7 @@ export class GeminiAnswerService implements AnswerService {
                 if (part.text) {
                   accumulatedText += part.text;
                   if (visibleTTFA === undefined && accumulatedText.trim()) {
-                    visibleTTFA = Date.now() - startTime;
+                    visibleTTFA = Date.now() - questionCommittedAt;
                   }
                   // Yield progressive accumulatedText chunk
                   yield { type: "chunk", accumulatedText };
@@ -200,17 +205,16 @@ export class GeminiAnswerService implements AnswerService {
       }
     }
 
-    const totalTime = Date.now() - startTime;
+    const commitToRequest = geminiRequestStartedAt - questionCommittedAt;
+    const networkTTFTMs = networkTTFT ?? 0;
+    const commitToVisibleAnswerMs = visibleTTFA ?? (answerCompletedAt ? answerCompletedAt - questionCommittedAt : 0);
+    const totalGenMs = answerCompletedAt ? answerCompletedAt - geminiRequestStartedAt : 0;
 
-    if (process.env.NODE_ENV !== "production") {
-      console.log(`[ANSWER]`);
-      console.log(`questionId: ${request.questionId}`);
-      console.log(`provider: ${this.providerName}`);
-      console.log(`model: ${this.modelName}`);
-      console.log(`networkTTFT: ${networkTTFT ?? totalTime} ms`);
-      console.log(`visibleTTFA: ${visibleTTFA ?? totalTime} ms`);
-      console.log(`totalGenerationTime: ${totalTime} ms`);
-    }
+    console.log(`[ANSWER LATENCY]`);
+    console.log(`commitToRequest: ${commitToRequest} ms`);
+    console.log(`networkTTFT: ${networkTTFTMs} ms`);
+    console.log(`commitToVisibleAnswer: ${commitToVisibleAnswerMs} ms`);
+    console.log(`totalGeneration: ${totalGenMs} ms`);
 
     const finalAnswer = parseAnswerJson(accumulatedText);
 
