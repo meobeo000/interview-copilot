@@ -93,7 +93,7 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /listen/i }));
+    fireEvent.click(screen.getByRole("button", { name: /listen|bắt đầu/i }));
 
     // Segment 1
     act(() => {
@@ -158,7 +158,7 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /listen/i }));
+    fireEvent.click(screen.getByRole("button", { name: /listen|bắt đầu/i }));
 
     act(() => {
       partialCb?.("Em sẽ xử lý như thế nào?");
@@ -194,13 +194,13 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /listen/i }));
+    fireEvent.click(screen.getByRole("button", { name: /listen|bắt đầu/i }));
 
     act(() => {
       partialCb?.("Theo em nếu website giảm 40% traffic thì kiểm tra gì?");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /answer now/i }));
+    fireEvent.click(screen.getByRole("button", { name: /answer now|trả lời ngay/i }));
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
@@ -216,7 +216,7 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /listen/i }));
+    fireEvent.click(screen.getByRole("button", { name: /listen|bắt đầu/i }));
 
     // Question 1
     act(() => {
@@ -249,7 +249,7 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
     window.copilotWindow = makeMockCopilotWindow(cb => { partialCb = cb; });
 
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: /listen/i }));
+    fireEvent.click(screen.getByRole("button", { name: /listen|bắt đầu/i }));
 
     // Q1
     act(() => {

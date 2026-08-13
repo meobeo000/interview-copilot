@@ -8,6 +8,29 @@ import { StatusPill } from "./components/StatusPill";
 import { TranscriptPanel } from "./components/TranscriptPanel";
 import { useCopilotStore } from "./store/useCopilotStore";
 
+function getUserFacingErrorMessage(error?: string): { title: string; detail: string } {
+  if (!error) {
+    return { title: "Không thể tạo câu trả lời.", detail: "Vui lòng thử lại." };
+  }
+  const lower = error.toLowerCase();
+  if (
+    lower.includes("api_key") ||
+    lower.includes("gemini_api_key") ||
+    lower.includes("groq_api_key") ||
+    lower.includes("missing") ||
+    lower.includes("chưa cấu hình")
+  ) {
+    return {
+      title: "Không thể tạo câu trả lời.",
+      detail: "Chưa cấu hình dịch vụ AI."
+    };
+  }
+  return {
+    title: "Không thể tạo câu trả lời.",
+    detail: "Vui lòng thử lại."
+  };
+}
+
 export function App() {
   const {
     status,
@@ -32,6 +55,13 @@ export function App() {
     status === "Listening" || status === "PossibleEnd" || status === "FinalizingQuestion";
 
   const canRegenerate = Boolean(cleanedQuestion || rawQuestion) && status !== "Answering";
+  const userError = error ? getUserFacingErrorMessage(error) : null;
+
+  useEffect(() => {
+    if (error) {
+      console.error("[Copilot Error Diagnostic]:", error);
+    }
+  }, [error]);
 
   useEffect(() => {
     const unsub = window.copilotWindow?.onAnswerNow?.(() => {
@@ -67,7 +97,7 @@ export function App() {
             className="icon-button"
             type="button"
             onClick={hideOverlay}
-            aria-label="Hide overlay"
+            aria-label="Ẩn cửa sổ"
             title="Ẩn cửa sổ (Alt+Space)"
           >
             <EyeOff size={18} />
@@ -80,7 +110,7 @@ export function App() {
           type="button"
           className="primary-action"
           onClick={isListeningState ? pause : startListening}
-          aria-label="Listen"
+          aria-label="Bắt đầu hoặc dừng nghe"
         >
           {isListeningState ? <Pause size={18} /> : <Play size={18} />}
           <span>{isListeningState ? "Dừng nghe" : "Bắt đầu nghe"}</span>
@@ -91,7 +121,7 @@ export function App() {
           className="accent-action"
           onClick={finalizeQuestionNow}
           disabled={!liveTranscript.trim() || status === "Answering"}
-          aria-label="Answer Now"
+          aria-label="Trả lời ngay"
           title="Chốt câu hỏi và trả lời ngay (Alt+Enter)"
         >
           <Zap size={16} />
@@ -102,7 +132,7 @@ export function App() {
           type="button"
           onClick={() => void regenerateAnswer()}
           disabled={!canRegenerate}
-          aria-label="Regenerate"
+          aria-label="Tạo lại câu trả lời"
           title="Tạo lại câu trả lời"
         >
           <RefreshCw size={16} />
@@ -113,7 +143,7 @@ export function App() {
           type="button"
           className="history-button"
           onClick={toggleHistoryDrawer}
-          aria-label="History"
+          aria-label="Mở lịch sử"
           title="Xem lịch sử câu hỏi"
         >
           <History size={16} />
@@ -121,11 +151,11 @@ export function App() {
         </button>
       </nav>
 
-      {error ? (
+      {userError ? (
         <div className="error-banner">
           <div className="error-text">
-            <strong>Không thể tạo câu trả lời.</strong>
-            <span className="error-detail">{error}</span>
+            <strong>{userError.title}</strong>
+            <span className="error-detail">{userError.detail}</span>
           </div>
           <button
             type="button"

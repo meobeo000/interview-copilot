@@ -60,7 +60,7 @@ export function HistoryDrawer({ isOpen, history, onClose }: HistoryDrawerProps) 
 
               {selectedItem.correctedTranscript && selectedItem.correctedTranscript !== selectedItem.rawTranscript ? (
                 <div className="detail-section">
-                  <h4>Bản dịch chuẩn SEO</h4>
+                  <h4>Transcript đã chỉnh</h4>
                   <p className="detail-text muted">{selectedItem.correctedTranscript}</p>
                 </div>
               ) : null}
