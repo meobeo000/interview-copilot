@@ -15,8 +15,6 @@ export function App() {
     liveTranscript,
     rawQuestion,
     cleanedQuestion,
-    detectedTopic,
-    questionConfidence,
     answer,
     history,
     isHistoryOpen,
@@ -33,8 +31,7 @@ export function App() {
   const isListeningState =
     status === "Listening" || status === "PossibleEnd" || status === "FinalizingQuestion";
 
-  const canRegenerate = Boolean(cleanedQuestion) && status !== "Answering";
-  const hasQuestion = Boolean(cleanedQuestion || rawQuestion);
+  const canRegenerate = Boolean(cleanedQuestion || rawQuestion) && status !== "Answering";
 
   useEffect(() => {
     const unsub = window.copilotWindow?.onAnswerNow?.(() => {
@@ -57,11 +54,11 @@ export function App() {
   }, [finalizeQuestionNow]);
 
   return (
-    <main className={`overlay-shell ${!hasQuestion ? "mode-listening-dominant" : "mode-qna"}`}>
+    <main className="overlay-shell">
       <header className="titlebar">
-        <div>
-          <span className="eyebrow">Vietnamese SEO Interview Copilot</span>
-          <h1>Live Assist</h1>
+        <div className="brand">
+          <span className="eyebrow">Interview Copilot</span>
+          <span className="subtitle">Trợ lý phỏng vấn SEO</span>
         </div>
         <div className="window-actions">
           <AudioMeter level={audioLevel} active={isListeningState} error={error} />
@@ -71,21 +68,22 @@ export function App() {
             type="button"
             onClick={hideOverlay}
             aria-label="Hide overlay"
-            title="Hide overlay (Alt+Space)"
+            title="Ẩn cửa sổ (Alt+Space)"
           >
             <EyeOff size={18} />
           </button>
         </div>
       </header>
 
-      <nav className="toolbar" aria-label="Interview controls">
+      <nav className="toolbar" aria-label="Điều khiển phỏng vấn">
         <button
           type="button"
           className="primary-action"
           onClick={isListeningState ? pause : startListening}
+          aria-label="Listen"
         >
           {isListeningState ? <Pause size={18} /> : <Play size={18} />}
-          <span>{isListeningState ? "Pause" : "Listen"}</span>
+          <span>{isListeningState ? "Dừng nghe" : "Bắt đầu nghe"}</span>
         </button>
 
         <button
@@ -93,44 +91,68 @@ export function App() {
           className="accent-action"
           onClick={finalizeQuestionNow}
           disabled={!liveTranscript.trim() || status === "Answering"}
-          title="Finalize transcript as question immediately (Alt+Enter)"
+          aria-label="Answer Now"
+          title="Chốt câu hỏi và trả lời ngay (Alt+Enter)"
         >
           <Zap size={16} />
-          <span>Answer Now</span>
+          <span>Trả lời ngay</span>
         </button>
 
-        <button type="button" onClick={() => void regenerateAnswer()} disabled={!canRegenerate}>
+        <button
+          type="button"
+          onClick={() => void regenerateAnswer()}
+          disabled={!canRegenerate}
+          aria-label="Regenerate"
+          title="Tạo lại câu trả lời"
+        >
           <RefreshCw size={16} />
-          <span>Regenerate</span>
+          <span>Tạo lại</span>
         </button>
 
         <button
           type="button"
           className="history-button"
           onClick={toggleHistoryDrawer}
-          title="View Q&A History"
+          aria-label="History"
+          title="Xem lịch sử câu hỏi"
         >
           <History size={16} />
-          <span>History ({history.length})</span>
+          <span>Lịch sử ({history.length})</span>
         </button>
       </nav>
 
-      {error ? <div className="error-banner">{error}</div> : null}
+      {error ? (
+        <div className="error-banner">
+          <div className="error-text">
+            <strong>Không thể tạo câu trả lời.</strong>
+            <span className="error-detail">{error}</span>
+          </div>
+          <button
+            type="button"
+            className="retry-button"
+            onClick={() => void regenerateAnswer()}
+            disabled={!canRegenerate}
+          >
+            Thử lại
+          </button>
+        </div>
+      ) : null}
 
-      <div className="content-container">
-        <TranscriptPanel transcript={liveTranscript} />
+      <div className="main-layout">
+        <div className="left-column">
+          <QuestionPanel
+            rawQuestion={rawQuestion}
+            cleanedQuestion={cleanedQuestion}
+          />
+          <TranscriptPanel
+            transcript={liveTranscript}
+            isListening={isListeningState}
+          />
+        </div>
 
-        {hasQuestion ? (
-          <>
-            <QuestionPanel
-              rawQuestion={rawQuestion}
-              cleanedQuestion={cleanedQuestion}
-              topic={detectedTopic}
-              confidence={questionConfidence}
-            />
-            <AnswerPanel answer={answer} isAnswering={status === "Answering"} />
-          </>
-        ) : null}
+        <div className="right-column">
+          <AnswerPanel answer={answer} isAnswering={status === "Answering"} />
+        </div>
       </div>
 
       <HistoryDrawer

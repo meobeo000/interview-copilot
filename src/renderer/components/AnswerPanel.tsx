@@ -6,16 +6,15 @@ interface AnswerPanelProps {
 }
 
 export function AnswerPanel({ answer, isAnswering = false }: AnswerPanelProps) {
-  const hasAnswer =
-    Boolean(answer.streamingText) ||
+  const hasContent =
     Boolean(answer.openingLine) ||
     answer.bullets.length > 0 ||
-    answer.keywords.length > 0;
+    Boolean(answer.streamingText);
 
   return (
     <section className="panel answer-panel">
-      <div className="panel-label">Answer</div>
-      {hasAnswer ? (
+      <div className="panel-label">GỢI Ý TRẢ LỜI</div>
+      {hasContent ? (
         <div className="answer-content">
           {answer.streamingText && !answer.openingLine ? (
             <p className="opening-line streaming-live">{answer.streamingText}</p>
@@ -23,15 +22,15 @@ export function AnswerPanel({ answer, isAnswering = false }: AnswerPanelProps) {
             <>
               {answer.openingLine ? <p className="opening-line">{answer.openingLine}</p> : null}
               {answer.bullets.length > 0 ? (
-                <ul>
+                <ul className="answer-bullets">
                   {answer.bullets.map((bullet, idx) => (
                     <li key={idx}>{bullet}</li>
                   ))}
                 </ul>
               ) : null}
-              {answer.keywords.length > 0 ? (
+              {answer.keywords && answer.keywords.length > 0 ? (
                 <div className="keywords">
-                  {answer.keywords.map((keyword, idx) => (
+                  {answer.keywords.slice(0, 5).map((keyword, idx) => (
                     <span key={idx} className="keyword-chip">
                       {keyword}
                     </span>
@@ -44,12 +43,11 @@ export function AnswerPanel({ answer, isAnswering = false }: AnswerPanelProps) {
       ) : isAnswering ? (
         <div className="answer-loading">
           <span className="loading-dot" />
-          <p className="placeholder loading-text">Đang suy nghĩ gợi ý trả lời...</p>
+          <p className="placeholder loading-text">Đang tạo câu trả lời...</p>
         </div>
       ) : (
-        <p className="placeholder">Gợi ý trả lời sẽ xuất hiện từng phần sau khi phát hiện câu hỏi.</p>
+        <p className="placeholder">Gợi ý trả lời sẽ xuất hiện khi phát hiện câu hỏi.</p>
       )}
     </section>
   );
 }
-

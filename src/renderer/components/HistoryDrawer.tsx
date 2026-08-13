@@ -17,12 +17,12 @@ export function HistoryDrawer({ isOpen, history, onClose }: HistoryDrawerProps) 
 
   const formatTime = (ts: number) => {
     const d = new Date(ts);
-    return d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
   };
 
   return (
-    <div className="history-drawer-overlay">
-      <div className="history-drawer">
+    <div className="history-drawer-overlay" onClick={onClose}>
+      <div className="history-drawer" onClick={(e) => e.stopPropagation()}>
         <header className="drawer-header">
           <div className="drawer-title">
             {selectedItem ? (
@@ -32,16 +32,16 @@ export function HistoryDrawer({ isOpen, history, onClose }: HistoryDrawerProps) 
                 onClick={() => setSelectedItem(undefined)}
               >
                 <ArrowLeft size={16} />
-                <span>Back to list</span>
+                <span>Quay lại danh sách</span>
               </button>
             ) : (
               <>
                 <Clock size={16} />
-                <span>History ({history.length})</span>
+                <span>Lịch sử ({history.length})</span>
               </>
             )}
           </div>
-          <button type="button" className="icon-button" onClick={onClose} title="Close drawer">
+          <button type="button" className="icon-button" onClick={onClose} title="Đóng lịch sử">
             <X size={18} />
           </button>
         </header>
@@ -51,31 +51,23 @@ export function HistoryDrawer({ isOpen, history, onClose }: HistoryDrawerProps) 
             <div className="history-detail">
               <div className="detail-meta">
                 <span className="detail-time">{formatTime(selectedItem.startedAt)}</span>
-                {selectedItem.detectedTopic ? (
-                  <span className="detail-topic">{selectedItem.detectedTopic}</span>
-                ) : null}
               </div>
 
               <div className="detail-section">
-                <h4>Cleaned Question</h4>
+                <h4>Câu hỏi</h4>
                 <p className="detail-text bold">{selectedItem.cleanedQuestion ?? selectedItem.rawTranscript}</p>
               </div>
 
               {selectedItem.correctedTranscript && selectedItem.correctedTranscript !== selectedItem.rawTranscript ? (
                 <div className="detail-section">
-                  <h4>Corrected Speech Transcript</h4>
-                  <p className="detail-text bold">{selectedItem.correctedTranscript}</p>
+                  <h4>Bản dịch chuẩn SEO</h4>
+                  <p className="detail-text muted">{selectedItem.correctedTranscript}</p>
                 </div>
               ) : null}
 
-              <div className="detail-section">
-                <h4>Raw Speech Transcript</h4>
-                <p className="detail-text muted">{selectedItem.rawTranscript}</p>
-              </div>
-
               {selectedItem.answer ? (
                 <div className="detail-section">
-                  <h4>Generated Answer</h4>
+                  <h4>Gợi ý trả lời</h4>
                   <p className="detail-text opening">{selectedItem.answer.openingLine}</p>
                   {selectedItem.answer.bullets.length > 0 ? (
                     <ul className="detail-bullets">
@@ -103,7 +95,6 @@ export function HistoryDrawer({ isOpen, history, onClose }: HistoryDrawerProps) 
                   >
                     <div className="card-header">
                       <span className="card-time">{formatTime(item.startedAt)}</span>
-                      {item.detectedTopic ? <span className="card-topic">{item.detectedTopic}</span> : null}
                     </div>
                     <p className="card-question">{questionText}</p>
                     {answerPreview ? <p className="card-answer-preview">{answerPreview}</p> : null}

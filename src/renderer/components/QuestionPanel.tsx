@@ -1,28 +1,28 @@
 interface QuestionPanelProps {
   rawQuestion: string;
   cleanedQuestion: string;
-  topic: string;
+  topic?: string;
   confidence?: number;
 }
 
-export function QuestionPanel({ rawQuestion, cleanedQuestion, topic, confidence }: QuestionPanelProps) {
+export function QuestionPanel({ rawQuestion, cleanedQuestion }: QuestionPanelProps) {
+  const displayQuestion = cleanedQuestion || rawQuestion;
+
   return (
     <section className="panel question-panel">
-      <div className="panel-label">Question</div>
-      {cleanedQuestion ? (
-        <>
-          <p className="clean-question">{cleanedQuestion}</p>
-          <div className="question-meta">
-            <span>{topic}</span>
-            {confidence ? <span>{Math.round(confidence * 100)}% confidence</span> : null}
-          </div>
-          <details>
-            <summary>Raw transcript</summary>
-            <p>{rawQuestion}</p>
-          </details>
-        </>
+      <div className="panel-label">CÂU HỎI HIỆN TẠI</div>
+      {displayQuestion ? (
+        <div className="question-content">
+          <p className="clean-question">“{displayQuestion}”</p>
+          {rawQuestion && rawQuestion !== cleanedQuestion ? (
+            <details className="raw-transcript-details">
+              <summary>Transcript gốc</summary>
+              <p>{rawQuestion}</p>
+            </details>
+          ) : null}
+        </div>
       ) : (
-        <p className="placeholder">Câu hỏi đã hoàn tất sẽ được giữ ở đây khi phần trả lời đang stream.</p>
+        <p className="placeholder">Chưa có câu hỏi...</p>
       )}
     </section>
   );
