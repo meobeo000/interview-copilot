@@ -1,5 +1,6 @@
 import { GeminiAnswerService, readGeminiAnswerConfig } from "./geminiAnswerService";
 import { GroqAnswerService, readGroqAnswerConfig } from "./groqAnswerService";
+import { OpenAIAnswerService, readOpenAIAnswerConfig } from "./openaiAnswerService";
 import { MainBridgeAnswerService } from "./mainBridgeAnswerService";
 import { MockAnswerService } from "./mockAnswerService";
 import type { AnswerService } from "./types";
@@ -27,6 +28,11 @@ export function createAnswerService(env: Record<string, string | undefined> = pr
   if (provider === "groq") {
     const groqConfig = readGroqAnswerConfig(env);
     return new GroqAnswerService(groqConfig);
+  }
+
+  if (provider === "openai") {
+    const openaiConfig = readOpenAIAnswerConfig(env);
+    return new OpenAIAnswerService(openaiConfig);
   }
 
   // Default provider: gemini

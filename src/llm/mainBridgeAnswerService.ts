@@ -96,9 +96,8 @@ export class MainBridgeAnswerService implements AnswerService {
         .then(() => {
           isDone = true;
         })
-        .catch((err: unknown) => {
+        .catch(() => {
           isDone = true;
-          throw err;
         });
 
       while (!isDone || pendingDeltas.length > 0) {

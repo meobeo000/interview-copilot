@@ -59,6 +59,10 @@ export function logEnvDiagnostics(): void {
   if (answerProvider === "groq") {
     console.log(`GROQ_API_KEY=${groqKey ? "configured" : "missing"}`);
   }
+  if (answerProvider === "openai") {
+    const openaiKey = process.env.OPENAI_API_KEY?.trim();
+    console.log(`OPENAI_API_KEY=${openaiKey ? "configured" : "missing"}`);
+  }
 }
 
 export function bootstrapEnv(): void {
