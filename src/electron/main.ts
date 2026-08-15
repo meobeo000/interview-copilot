@@ -7,6 +7,11 @@ import { SttMainService } from "./sttMainService";
 
 bootstrapEnv();
 
+const provider = (process.env.ANSWER_PROVIDER || "gemini").trim();
+const model = (process.env.GEMINI_ANSWER_MODEL || "gemini-3.1-flash-lite").trim();
+const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+console.log(`[ANSWER PROVIDER]\nprovider=${provider}\nmodel=${model}\napiKey=${apiKey ? "configured" : "missing"}\nstatus=ready`);
+
 let mainWindow: BrowserWindow | undefined;
 const sttMainService = new SttMainService();
 const answerMainService = new AnswerMainService();

@@ -10,6 +10,7 @@
     "smoke:electron": "cross-env ELECTRON_SMOKE=1 electron .",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint .",
+    "diagnostic:gemini": "npx tsx src/diagnostics/geminiDiagnostic.ts",
     "test": "vitest run",
     "build": "tsc -p tsconfig.node.json && vite build"
   },

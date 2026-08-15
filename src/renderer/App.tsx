@@ -48,6 +48,7 @@ export function App() {
     toggleHistoryDrawer,
     setHistoryOpen,
     regenerateAnswer,
+    triggerDevDirectQuestion,
     hideOverlay
   } = useCopilotStore();
 
@@ -149,6 +150,20 @@ export function App() {
           <History size={16} />
           <span>Lịch sử ({history.length})</span>
         </button>
+
+        {import.meta.env?.DEV || process.env.NODE_ENV !== "production" ? (
+          <button
+            type="button"
+            className="accent-action"
+            style={{ fontSize: "11px", padding: "4px 8px" }}
+            onClick={() => void triggerDevDirectQuestion()}
+            disabled={status === "Answering"}
+            aria-label="Direct Gemini Test"
+            title="Gửi câu hỏi test trực tiếp qua IPC tới Gemini"
+          >
+            🧪 Test Gemini
+          </button>
+        ) : null}
       </nav>
 
       {userError ? (

@@ -277,6 +277,6 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
 
     const q2 = history[0];
     expect(q2.rawTranscript).toBe("Em nói cho anh từ lúc nhận sai đến lúc keyword lên như thế nào?");
-    expect(q2.correctedTranscript).toBe("Em nói cho anh từ lúc nhận site đến lúc keyword lên như thế nào?");
+    expect(q2.correctedTranscript).toBe("Em nói cho anh từ lúc nhận sai đến lúc keyword lên như thế nào?");
   });
 });

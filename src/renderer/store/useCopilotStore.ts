@@ -121,6 +121,7 @@ interface CopilotState {
   toggleHistoryDrawer: () => void;
   setHistoryOpen: (open: boolean) => void;
   regenerateAnswer: () => Promise<void>;
+  triggerDevDirectQuestion: (questionText?: string) => Promise<void>;
   hideOverlay: () => Promise<void>;
 }
 
@@ -744,6 +745,39 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
       return;
     }
     await streamAnswerForItem(question, set, get);
+  },
+  triggerDevDirectQuestion: async (questionText = "Site mở bot hai tuần vẫn chưa nhận keyword thì em xử lý thế nào?") => {
+    clearGraceWindow();
+    abortActiveSpeculative();
+    smartDetector.reset();
+    resetTurnTelemetry();
+
+    const rawText = questionText;
+    const correctionResult = corrector.correct(rawText, { domain: "seo_igaming_interview" });
+    const correctedText = correctionResult.correctedText;
+    const finalIntent = smartDetector.detectIntent(correctedText, rawText);
+    const commitTime = Date.now();
+
+    const newItem: ConversationItem = {
+      id: crypto.randomUUID(),
+      startedAt: commitTime,
+      rawTranscript: rawText,
+      correctedTranscript: correctedText,
+      cleanedQuestion: correctedText,
+      detectedTopic: finalIntent.category !== "UNKNOWN" ? finalIntent.category : "Vietnamese SEO Question",
+      intent: finalIntent,
+      answerProvider: answerService.providerName,
+      answerModel: answerService.modelName,
+      timestamps: {
+        speechLastActivityAt: commitTime,
+        questionIntentReadyAt: commitTime,
+        questionCommittedAt: commitTime,
+        mode: "normalCommitted"
+      }
+    };
+
+    activeItem = newItem;
+    await streamAnswerForItem(newItem, set, get);
   },
   hideOverlay: () => window.copilotWindow.hide()
 }));

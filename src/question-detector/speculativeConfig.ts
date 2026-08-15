@@ -8,11 +8,14 @@ export const SPECULATIVE_CONFIG = {
 } as const;
 
 export function isSpeculativeEnabled(env?: Record<string, string | undefined>): boolean {
-  if (typeof import.meta !== "undefined" && import.meta.env?.VITE_SPECULATIVE_ANSWER_ENABLED !== undefined) {
-    return import.meta.env.VITE_SPECULATIVE_ANSWER_ENABLED === "true";
-  }
   if (env?.SPECULATIVE_ANSWER_ENABLED !== undefined) {
     return env.SPECULATIVE_ANSWER_ENABLED === "true";
+  }
+  if (env?.VITE_SPECULATIVE_ANSWER_ENABLED !== undefined) {
+    return env.VITE_SPECULATIVE_ANSWER_ENABLED === "true";
+  }
+  if (typeof import.meta !== "undefined" && import.meta.env?.VITE_SPECULATIVE_ANSWER_ENABLED !== undefined) {
+    return import.meta.env.VITE_SPECULATIVE_ANSWER_ENABLED === "true";
   }
   if (typeof process !== "undefined" && process.env?.SPECULATIVE_ANSWER_ENABLED !== undefined) {
     return process.env.SPECULATIVE_ANSWER_ENABLED === "true";

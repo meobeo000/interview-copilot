@@ -1,32 +1,10 @@
 import type { ChangeDetail, CorrectionResult, CorrectorContext, TranscriptCorrector } from "./types";
 
-const FALSE_POSITIVE_SAI_PATTERNS = [
-  /\bnói\s+sai\b/i,
-  /\blàm\s+sai\b/i,
-  /\btính\s+sai\b/i,
-  /\bviết\s+sai\b/i,
-  /\bhiểu\s+sai\b/i,
-  /\bchỉ\s+sai\b/i,
-  /\bđánh\s+giá\s+sai\b/i,
-  /\bxây\s+sai\b/i,
-  /\bchạy\s+sai\b/i,
-  /\bmở\s+sai\b/i,
-  /\bchọn\s+sai\b/i,
-  /\bsetup\s+sai\b/i,
-  /\bcấu\s+hình\s+sai\b/i,
-  /\bsai\s+chỗ\b/i,
-  /\bsai\s+dữ\s+liệu\b/i,
-  /\bsai\s+canonical\b/i,
-  /\bsai\s+cấu\s+hình\b/i,
-  /\bsai\s+thông\s+số\b/i,
-  /\bsai\s+cấu\s+trúc\b/i,
-  /\bsai\s+campaign\b/i,
-  /\bsai\s+trang\b/i,
-  /\bsai\s+domain\b/i,
-  /\bsai\s+sót\b/i,
-  /\bsai\s+lầm\b/i
-];
-
+/**
+ * Safe Lexical Normalizer for SEO domain terms.
+ * Contains ONLY high-confidence, unambiguous transformations (compound spacing, capitalization).
+ * Vietnamese phonetic guesses and ambiguous mappings are handled by the semantic intent classifier.
+ */
 export class ContextAwareTranscriptCorrector implements TranscriptCorrector {
   correct(input: string, context?: CorrectorContext): CorrectionResult {
     const rawText = input;
@@ -42,186 +20,67 @@ export class ContextAwareTranscriptCorrector implements TranscriptCorrector {
     let currentText = input;
     const changes: ChangeDetail[] = [];
 
-    // 1. Ahrefs phonetics: "ai rép", "ai rep", "ai ref", "ah ref", "a href"
-    currentText = currentText.replace(/\b(ai\s+rép|ai\s+rep|ai\s+ref|ah\s+ref|a\s+href)\b/gi, (match) => {
-      changes.push({
-        from: match,
-        to: "Ahrefs",
-        reason: "SEO domain phonetic matching for Ahrefs",
-        confidence: 0.95
-      });
-      return "Ahrefs";
-    });
-
-    // 2. PBN phonetics: "pi bi en", "pi bi n", "bi bi en", "p b n"
-    currentText = currentText.replace(/\b(pi\s+bi\s+en|pi\s+bi\s+n|bi\s+bi\s+en|p\s+b\s+n)\b/gi, (match) => {
-      changes.push({
-        from: match,
-        to: "PBN",
-        reason: "SEO domain phonetic matching for PBN",
-        confidence: 0.95
-      });
-      return "PBN";
-    });
-
-    // 3. GSC phonetics: "gi ét xi", "gi et xi", "g s c"
-    currentText = currentText.replace(/\b(gi\s+ét\s+xi|gi\s+et\s+xi|g\s+s\s+c)\b/gi, (match) => {
-      changes.push({
-        from: match,
-        to: "GSC",
-        reason: "SEO domain phonetic matching for GSC",
-        confidence: 0.95
-      });
-      return "GSC";
-    });
-
-    // 4. Core Update phonetics: "core update", "co update", "co up date", "core up date"
-    currentText = currentText.replace(/\b(co\s+update|co\s+up\s+date|core\s+up\s+date)\b/gi, (match) => {
-      changes.push({
-        from: match,
-        to: "Core Update",
-        reason: "SEO domain phonetic matching for Core Update",
-        confidence: 0.95
-      });
-      return "Core Update";
-    });
-
-    // 5. iGaming phonetics: "i gaming", "igaming", "in gaming"
-    currentText = currentText.replace(/\b(i\s+gaming|igaming|in\s+gaming)\b/gi, (match) => {
-      changes.push({
-        from: match,
-        to: "iGaming",
-        reason: "SEO domain capitalization for iGaming",
-        confidence: 0.95
-      });
-      return "iGaming";
-    });
-
-    // 6. Guest Post phonetics: "guestpost", "guest port", "gét pót"
-    currentText = currentText.replace(/\b(guestpost|guest\s+port|gét\s+pót)\b/gi, (match) => {
-      changes.push({
-        from: match,
-        to: "Guest Post",
-        reason: "SEO domain capitalization for Guest Post",
-        confidence: 0.90
-      });
-      return "Guest Post";
-    });
-
-    // 7. Entity phonetics: "en ti ti", "en ti ty"
-    currentText = currentText.replace(/\b(en\s+ti\s+ti|en\s+ti\s+ty)\b/gi, (match) => {
-      changes.push({
-        from: match,
-        to: "Entity",
-        reason: "SEO domain phonetic matching for Entity",
-        confidence: 0.92
-      });
-      return "Entity";
-    });
-
-    // 8. Anchor text phonetics: "an co text", "an co teck", "anco text"
-    currentText = currentText.replace(/\b(an\s+co\s+text|an\s+co\s+teck|anco\s+text)\b/gi, (match) => {
-      changes.push({
-        from: match,
-        to: "anchor text",
-        reason: "SEO domain phonetic matching for anchor text",
-        confidence: 0.93
-      });
-      return "anchor text";
-    });
-
-    // 9. Backlink compound: "back link" -> "backlink"
+    // 1. Compound words: "back link" -> "backlink"
     currentText = currentText.replace(/\bback\s+link\b/gi, (match) => {
       changes.push({
         from: match,
         to: "backlink",
-        reason: "SEO compound word normalization for backlink",
-        confidence: 0.95
+        reason: "Safe lexical compound normalization for backlink",
+        confidence: 0.98
       });
       return "backlink";
     });
 
-    // 10. Keyword compound: "key word" -> "keyword"
+    // 2. Compound words: "key word" -> "keyword"
     currentText = currentText.replace(/\bkey\s+word\b/gi, (match) => {
       changes.push({
         from: match,
         to: "keyword",
-        reason: "SEO compound word normalization for keyword",
-        confidence: 0.95
+        reason: "Safe lexical compound normalization for keyword",
+        confidence: 0.98
       });
       return "keyword";
     });
 
-    // 11. Internal link plural/spacing normalization: "internal links" -> "internal link"
+    // 3. Terminology plural/spacing: "internal links" -> "internal link"
     currentText = currentText.replace(/\binternal\s+links\b/gi, (match) => {
       changes.push({
         from: match,
         to: "internal link",
-        reason: "SEO terminology normalization for internal link",
-        confidence: 0.92
+        reason: "Safe lexical normalization for internal link",
+        confidence: 0.95
       });
       return "internal link";
     });
 
-    // 12. Context-aware "chưa nhận cây" / "chưa nhận key" -> "chưa nhận keyword"
-    currentText = currentText.replace(/\b(chưa|không|chưa\s+hề)\s+nhận\s+(cây|key)\b/gi, (match, prefix: string) => {
-      const replacement = `${prefix} nhận keyword`;
+    // 4. Standard Capitalization: "igaming" / "i gaming" -> "iGaming"
+    currentText = currentText.replace(/\b(i\s+gaming|igaming)\b/gi, (match) => {
       changes.push({
         from: match,
-        to: replacement,
-        reason: "SEO context phonetic correction (nhận cây/key -> nhận keyword)",
-        confidence: 0.91
+        to: "iGaming",
+        reason: "Safe brand capitalization for iGaming",
+        confidence: 0.98
       });
-      return replacement;
+      return "iGaming";
     });
 
-    // 13. Tightened Context-Aware "sai" -> "site" with false-positive protection
-    const hasForbiddenPattern = FALSE_POSITIVE_SAI_PATTERNS.some((pattern) => pattern.test(currentText));
-
-    if (!hasForbiddenPattern) {
-      // Specifically "nhận sai" -> "nhận site"
-      currentText = currentText.replace(/\bnhận\s+sai\b/gi, (match) => {
-        changes.push({
-          from: match,
-          to: "nhận site",
-          reason: "SEO domain context (nhận sai -> nhận site)",
-          confidence: 0.94
-        });
-        return "nhận site";
+    // 5. Standard Capitalization: "guestpost" -> "Guest Post"
+    currentText = currentText.replace(/\bguestpost\b/gi, (match) => {
+      changes.push({
+        from: match,
+        to: "Guest Post",
+        reason: "Safe brand capitalization for Guest Post",
+        confidence: 0.95
       });
-
-      // Specifically "con sai này/đó/mới/đang/vệ tinh/money" -> "con site ..."
-      currentText = currentText.replace(/\bcon\s+sai\s+(này|đó|mới|đang|vệ\s+tinh|money)\b/gi, (match, modifier: string) => {
-        const replacement = `con site ${modifier}`;
-        changes.push({
-          from: match,
-          to: replacement,
-          reason: "SEO website noun phrase context (con sai -> con site)",
-          confidence: 0.94
-        });
-        return replacement;
-      });
-
-      // Specifically "sai mới/vệ tinh/money/mở bot" -> "site mới/..."
-      currentText = currentText.replace(/\bsai\s+(mới|vệ\s+tinh|money|mở\s+bot)\b/gi, (match, modifier: string) => {
-        const replacement = `site ${modifier}`;
-        changes.push({
-          from: match,
-          to: replacement,
-          reason: "SEO website modifier context (sai -> site)",
-          confidence: 0.94
-        });
-        return replacement;
-      });
-    }
+      return "Guest Post";
+    });
 
     const overallConfidence = changes.length > 0
       ? changes.reduce((sum, c) => sum + c.confidence, 0) / changes.length
       : 1.0;
 
-    // Dev logging for active corrections
     if (changes.length > 0 && (context?.domain || process.env.NODE_ENV !== "production")) {
-      console.log("[CORRECTION]");
+      console.log("[SAFE LEXICAL NORMALIZATION]");
       for (const ch of changes) {
         console.log(`"${ch.from}" → "${ch.to}" (confidence: ${ch.confidence})`);
       }
@@ -229,9 +88,10 @@ export class ContextAwareTranscriptCorrector implements TranscriptCorrector {
 
     return {
       rawText,
+      displayTranscript: currentText,
       correctedText: currentText,
       changes,
       confidence: Math.round(overallConfidence * 100) / 100
-    };
+    } as CorrectionResult;
   }
 }

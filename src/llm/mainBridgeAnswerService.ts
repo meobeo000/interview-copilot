@@ -1,5 +1,6 @@
 import type { AnswerDelta, AnswerRequest, AnswerService } from "./types";
 import type { SuggestedAnswer } from "../shared/types";
+import { AnswerTraceLogger } from "../shared/answerTrace";
 
 type GlobalWindow = {
   copilotWindow?: {
@@ -14,7 +15,7 @@ type GlobalWindow = {
 };
 
 export class MainBridgeAnswerService implements AnswerService {
-  readonly providerName = "groq";
+  readonly providerName = "gemini";
   readonly modelName = "main-process-model";
 
   async *streamAnswer(request: AnswerRequest): AsyncGenerator<AnswerDelta, SuggestedAnswer, void> {
@@ -35,6 +36,7 @@ export class MainBridgeAnswerService implements AnswerService {
 
     const pendingDeltas: AnswerDelta[] = [];
     let notifyNext: (() => void) | undefined;
+    let firstRendererChunkReceivedAt: number | undefined;
 
     const pushDelta = (delta: AnswerDelta) => {
       pendingDeltas.push(delta);
@@ -47,6 +49,12 @@ export class MainBridgeAnswerService implements AnswerService {
 
     const cleanupChunk = answerApi.onChunk((payload: { questionId: string; accumulatedText: string }) => {
       if (payload.questionId === request.questionId) {
+        if (firstRendererChunkReceivedAt === undefined) {
+          firstRendererChunkReceivedAt = Date.now();
+          AnswerTraceLogger.record(request.questionId, {
+            rendererChunkReceived: firstRendererChunkReceivedAt
+          });
+        }
         pushDelta({ type: "chunk", accumulatedText: payload.accumulatedText });
       }
     });

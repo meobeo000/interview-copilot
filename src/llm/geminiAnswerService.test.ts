@@ -11,7 +11,7 @@ describe("GeminiAnswerService & Provider Factory Integration", () => {
     });
 
     expect(config.apiKey).toBe("AIzaSyTestKey123");
-    expect(config.model).toBe("gemini-flash-latest");
+    expect(config.model).toBe("gemini-3.1-flash-lite");
   });
 
   it("differentiates missing configuration error cleanly", async () => {

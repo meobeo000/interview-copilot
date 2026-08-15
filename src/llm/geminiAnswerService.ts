@@ -3,6 +3,7 @@ import type { SuggestedAnswer } from "../shared/types";
 import { calculatePipelineMetrics, extractFirstUsefulAnswer, formatPipelineMetricsLog } from "../shared/telemetry";
 import { FAST_SEO_INTERVIEW_SYSTEM_PROMPT } from "./prompts/fastSeoInterviewPrompt";
 import { parseStreamingAnswer } from "./parseAnswerJson";
+import { AnswerTraceLogger } from "../shared/answerTrace";
 
 export interface GeminiAnswerConfig {
   apiKey: string;
@@ -11,7 +12,7 @@ export interface GeminiAnswerConfig {
 
 export function readGeminiAnswerConfig(env: Record<string, string | undefined> = process.env): GeminiAnswerConfig {
   const apiKey = (env.GEMINI_API_KEY || process.env.GEMINI_API_KEY)?.trim() ?? "";
-  const model = (env.GEMINI_ANSWER_MODEL || process.env.GEMINI_ANSWER_MODEL)?.trim() || "gemini-flash-latest";
+  const model = (env.GEMINI_ANSWER_MODEL || process.env.GEMINI_ANSWER_MODEL)?.trim() || "gemini-3.1-flash-lite";
 
   return { apiKey, model };
 }
@@ -64,6 +65,12 @@ export class GeminiAnswerService implements AnswerService {
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.modelName)}:streamGenerateContent?alt=sse`;
 
+    AnswerTraceLogger.record(request.questionId, {
+      requestSent: Date.now(),
+      provider: "gemini",
+      model: this.modelName
+    });
+
     let response: Response;
     try {
       response = await this.fetchFn(endpoint, {
@@ -82,6 +89,10 @@ export class GeminiAnswerService implements AnswerService {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Gemini Network error: ${msg.replace(this.apiKey, "[REDACTED]")}`);
     }
+
+    AnswerTraceLogger.record(request.questionId, {
+      httpResponse: { status: response.status, time: Date.now() }
+    });
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
@@ -137,6 +148,9 @@ export class GeminiAnswerService implements AnswerService {
 
       if (firstAnswerTokenAt === undefined) {
         firstAnswerTokenAt = Date.now();
+        AnswerTraceLogger.record(request.questionId, {
+          firstNetworkChunk: firstAnswerTokenAt
+        });
       }
 
       buffer += decoder.decode(value, { stream: true });
@@ -171,6 +185,9 @@ export class GeminiAnswerService implements AnswerService {
                     const useful = extractFirstUsefulAnswer(parsedPartial) || extractFirstUsefulAnswer(accumulatedText);
                     if (useful) {
                       firstUsefulAnswerAt = Date.now();
+                      AnswerTraceLogger.record(request.questionId, {
+                        firstParsedText: { text: useful, time: firstUsefulAnswerAt }
+                      });
                     }
                   }
 
