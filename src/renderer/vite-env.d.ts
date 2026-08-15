@@ -3,6 +3,7 @@
 interface Window {
   copilotWindow: {
     hide: () => Promise<void>;
+    setContentProtection?: (enabled: boolean) => Promise<boolean>;
     getDesktopSourceId: () => Promise<string | undefined>;
     onAnswerNow?: (callback: () => void) => () => void;
     stt?: {

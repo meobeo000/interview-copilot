@@ -45,6 +45,7 @@ function createWindow() {
   });
 
   mainWindow.setAlwaysOnTop(true, "screen-saver");
+  mainWindow.setContentProtection(true);
 
   mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
     console.log(`[RENDERER ${level}] ${message} (${sourceId}:${line})`);
@@ -100,6 +101,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle("window:hide", () => {
     mainWindow?.hide();
+  });
+
+  ipcMain.handle("window:set-content-protection", (_event, enabled: boolean) => {
+    mainWindow?.setContentProtection(enabled);
+    return enabled;
   });
 
   ipcMain.handle("system-audio:get-source-id", async () => {

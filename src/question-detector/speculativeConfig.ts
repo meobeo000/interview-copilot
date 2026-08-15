@@ -1,4 +1,5 @@
 import type { QuestionIntent } from "./intentClassifier";
+import { hasEndQuestionMarker } from "./smartQuestionDetector";
 
 export const SPECULATIVE_CONFIG = {
   MIN_CONFIDENCE: 0.85,
@@ -30,6 +31,7 @@ export function isSpeculativeEnabled(env?: Record<string, string | undefined>): 
  * 2. Confidence >= MIN_CONFIDENCE (0.85)
  * 3. Text contains at least MIN_WORD_COUNT (4 words)
  * 4. Intent has at least MIN_EVIDENCE_COUNT (1 matching evidence item)
+ * 5. Text contains an end-of-question marker or interrogative structure (prevents cutting off preamble)
  */
 export function isEligibleForSpeculativeAnswer(
   intent: QuestionIntent | undefined,
@@ -49,6 +51,10 @@ export function isEligibleForSpeculativeAnswer(
   }
 
   if (!intent.evidence || intent.evidence.length < SPECULATIVE_CONFIG.MIN_EVIDENCE_COUNT) {
+    return false;
+  }
+
+  if (!hasEndQuestionMarker(text) && !text.trim().endsWith("?")) {
     return false;
   }
 

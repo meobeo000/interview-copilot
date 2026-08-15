@@ -1,8 +1,9 @@
 import { useEffect } from "react";
-import { EyeOff, History, Pause, Play, RefreshCw, Zap } from "lucide-react";
+import { EyeOff, History, Pause, Play, RefreshCw, Shield, ShieldCheck, User, Zap } from "lucide-react";
 import { AnswerPanel } from "./components/AnswerPanel";
 import { AudioMeter } from "./components/AudioMeter";
 import { HistoryDrawer } from "./components/HistoryDrawer";
+import { ProfileDrawer } from "./components/ProfileDrawer";
 import { QuestionPanel } from "./components/QuestionPanel";
 import { StatusPill } from "./components/StatusPill";
 import { TranscriptPanel } from "./components/TranscriptPanel";
@@ -41,12 +42,18 @@ export function App() {
     answer,
     history,
     isHistoryOpen,
+    candidateProfile,
+    isProfileOpen,
+    isContentProtected,
     error,
     startListening,
     pause,
     finalizeQuestionNow,
     toggleHistoryDrawer,
     setHistoryOpen,
+    setProfileOpen,
+    updateProfile,
+    toggleContentProtection,
     regenerateAnswer,
     triggerDevDirectQuestion,
     hideOverlay
@@ -92,6 +99,16 @@ export function App() {
           <span className="subtitle">Trợ lý phỏng vấn SEO</span>
         </div>
         <div className="window-actions">
+          <button
+            className="icon-button"
+            type="button"
+            onClick={() => void toggleContentProtection()}
+            aria-label="Tàng hình khi Share Screen"
+            title={isContentProtected ? "Đang bật tàng hình khi Share Screen (Zoom/Meet không thấy tool)" : "Tắt tàng hình khi Share Screen"}
+            style={{ color: isContentProtected ? "#22c55e" : "#94a3b8" }}
+          >
+            {isContentProtected ? <ShieldCheck size={18} /> : <Shield size={18} />}
+          </button>
           <AudioMeter level={audioLevel} active={isListeningState} error={error} />
           <StatusPill status={status} />
           <button
@@ -138,6 +155,17 @@ export function App() {
         >
           <RefreshCw size={16} />
           <span>Tạo lại</span>
+        </button>
+
+        <button
+          type="button"
+          className="history-button"
+          onClick={() => setProfileOpen(true)}
+          aria-label="Hồ sơ dự án thật"
+          title="Xem & sửa hồ sơ kinh nghiệm / số liệu dự án thật"
+        >
+          <User size={16} />
+          <span>Hồ sơ</span>
         </button>
 
         <button
@@ -204,6 +232,13 @@ export function App() {
         isOpen={isHistoryOpen}
         history={history}
         onClose={() => setHistoryOpen(false)}
+      />
+
+      <ProfileDrawer
+        isOpen={isProfileOpen}
+        profile={candidateProfile}
+        onClose={() => setProfileOpen(false)}
+        onSave={updateProfile}
       />
     </main>
   );

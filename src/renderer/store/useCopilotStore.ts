@@ -21,6 +21,7 @@ import { RealStreamingSTTService } from "../../transcription/realStreamingSTT";
 import type { TranscriptionService } from "../../transcription/types";
 
 import { parseStreamingAnswer } from "../../llm/parseAnswerJson";
+import { type CandidateProfile, loadCandidateProfile, saveCandidateProfile } from "../../shared/candidateProfile";
 
 const historyKey = "interview-copilot.history.v1";
 
@@ -114,12 +115,18 @@ interface CopilotState {
   answer: SuggestedAnswer;
   history: ConversationItem[];
   isHistoryOpen: boolean;
+  candidateProfile: import("../../shared/candidateProfile").CandidateProfile;
+  isProfileOpen: boolean;
+  isContentProtected: boolean;
   error?: string;
   startListening: () => void;
   pause: () => void;
   finalizeQuestionNow: () => void;
   toggleHistoryDrawer: () => void;
   setHistoryOpen: (open: boolean) => void;
+  setProfileOpen: (open: boolean) => void;
+  updateProfile: (profile: import("../../shared/candidateProfile").CandidateProfile) => void;
+  toggleContentProtection: () => Promise<void>;
   regenerateAnswer: () => Promise<void>;
   triggerDevDirectQuestion: (questionText?: string) => Promise<void>;
   hideOverlay: () => Promise<void>;
@@ -322,6 +329,7 @@ function startSpeculativeStream(
         speechLastActivityAt: timestamps.speechLastActivityAt,
         questionIntentReadyAt: timestamps.questionIntentReadyAt,
         recentHistory: get().history.slice(0, 5),
+        profile: get().candidateProfile,
         signal: abortController.signal
       });
 
@@ -578,7 +586,8 @@ async function streamAnswerForItem(
       questionCommittedAt: item.timestamps?.questionCommittedAt ?? item.startedAt,
       speechLastActivityAt: item.timestamps?.speechLastActivityAt,
       questionIntentReadyAt: item.timestamps?.questionIntentReadyAt,
-      recentHistory: get().history.slice(0, 5)
+      recentHistory: get().history.slice(0, 5),
+      profile: get().candidateProfile
     });
 
     for await (const delta of generator) {
@@ -636,6 +645,9 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
   answer: emptyAnswer(),
   history: readHistory(),
   isHistoryOpen: false,
+  candidateProfile: loadCandidateProfile(),
+  isProfileOpen: false,
+  isContentProtected: true,
   error: undefined,
   startListening: () => {
     transcriptController?.stop();
@@ -739,6 +751,18 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
   },
   toggleHistoryDrawer: () => set((state) => ({ isHistoryOpen: !state.isHistoryOpen })),
   setHistoryOpen: (open: boolean) => set({ isHistoryOpen: open }),
+  setProfileOpen: (open: boolean) => set({ isProfileOpen: open }),
+  updateProfile: (profile: CandidateProfile) => {
+    saveCandidateProfile(profile);
+    set({ candidateProfile: profile });
+  },
+  toggleContentProtection: async () => {
+    const nextState = !get().isContentProtected;
+    if (typeof window !== "undefined" && window.copilotWindow?.setContentProtection) {
+      await window.copilotWindow.setContentProtection(nextState);
+    }
+    set({ isContentProtected: nextState });
+  },
   regenerateAnswer: async () => {
     const question = activeItem;
     if (!question?.cleanedQuestion) {

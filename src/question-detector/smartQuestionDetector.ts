@@ -47,15 +47,17 @@ const questionRegexPatterns: RegExp[] = [
   /\b(có nên|có cần|có phải)\b/i,
 
   // Ends with question phrase/intent
-  /(thì sao|thế nào|như thế nào|ra sao|làm sao|kiểu gì|chia kiểu gì|ở đâu|là gì|tại sao|vì sao)$/i,
+  /(thì sao|thế nào|như thế nào|ra sao|làm sao|kiểu gì|chia kiểu gì|ở đâu|là gì|tại sao|vì sao|nhỉ|hả|hở)$/i,
 
   // Ends with question particle or interrogative pronoun
-  /(cái nào|con nào|bước nào|domain nào|cách nào|nào|gì|không|chưa|hả|à|ổn không|được không|đúng không)$/i,
+  /(cái nào|con nào|bước nào|domain nào|cách nào|nào|gì|không|chưa|hả|à|ổn không|được không|đúng không|phải không)$/i,
 
   // Verbal question structures
   /\b(chọn|làm|bắt đầu|xử lý|chia|kiểm tra|dùng)\b.+\b(nào|gì|sao|đâu)\b/i,
-  /\b(mô tả|trình bày|cho anh biết|giải thích|phân tích)\b/i
+  /\b(mô tả|trình bày|cho anh biết|giải thích|phân tích|nói cho anh|chia sẻ cho anh)\b/i
 ];
+
+const endOfQuestionRegex = /(\?|thì sao|thế nào|như thế nào|ra sao|làm sao|kiểu gì|ở đâu|là gì|tại sao|vì sao|cái nào|con nào|bước nào|domain nào|cách nào|nào|gì|không|chưa|hả|à|hở|nhỉ|ổn không|được không|đúng không|phải không)$/i;
 
 function normalizeText(text: string): string {
   return text
@@ -64,6 +66,14 @@ function normalizeText(text: string): string {
     .replace(/(^|\s+)(ờ|ừm|hả)($|\s+)/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function hasEndQuestionMarker(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (trimmed.endsWith("?")) return true;
+  const normalized = normalizeText(trimmed);
+  return endOfQuestionRegex.test(normalized) || /\b(nói cho anh|chia sẻ cho anh|giải thích cho anh|cho anh biết)\b/i.test(normalized);
 }
 
 export function hasQuestionIntent(text: string): boolean {
@@ -124,8 +134,8 @@ export class SmartQuestionDetector implements QuestionDetector {
   private candidateTimer: number | undefined;
   private hardTimeoutTimer: number | undefined;
 
-  public CANDIDATE_PAUSE_MS = 1200; // ~800ms - 1800ms
-  public HARD_TIMEOUT_MS = 2800; // ~1800ms - 3000ms
+  public CANDIDATE_PAUSE_MS = 1200;
+  public HARD_TIMEOUT_MS = 2800;
 
   /**
    * Evaluates semantic intent for the given transcript text.
@@ -146,10 +156,6 @@ export class SmartQuestionDetector implements QuestionDetector {
     };
   }
 
-  /**
-   * Deprecated / Internal helper for tests backward compatibility.
-   * Delegates directly to current turn text evaluation.
-   */
   appendSegment(segmentText: string): string {
     return segmentText.trim();
   }
@@ -168,8 +174,10 @@ export class SmartQuestionDetector implements QuestionDetector {
     // Reset timers when new speech arrives
     this.clearTimers();
 
-    // Check if immediate candidate intent can be extracted early (before grace window / hard timeout)
     const isComplete = hasQuestionIntent(trimmed) && !isSetupFragment(trimmed);
+    const hasEndMarker = hasEndQuestionMarker(trimmed);
+
+    // Only emit intent candidate if the question is complete and has an end-of-question marker or explicit question structure
     if (isComplete && onIntentCandidate) {
       const intent = this.detectIntent(trimmed);
       if (intent.category !== "UNKNOWN") {
@@ -181,7 +189,11 @@ export class SmartQuestionDetector implements QuestionDetector {
       }
     }
 
-    // Timer 1: Candidate Pause (~1200ms)
+    // Adaptive silence: If sentence has end marker, use standard pause (~1200ms). If fragment/preamble, wait longer (~2200ms).
+    const candidatePause = hasEndMarker ? this.CANDIDATE_PAUSE_MS : Math.max(this.CANDIDATE_PAUSE_MS, 2000);
+    const hardTimeout = hasEndMarker ? this.HARD_TIMEOUT_MS : Math.max(this.HARD_TIMEOUT_MS, 3200);
+
+    // Timer 1: Candidate Pause
     this.candidateTimer = window.setTimeout(() => {
       onPossibleEnd();
 
@@ -196,14 +208,13 @@ export class SmartQuestionDetector implements QuestionDetector {
         });
         this.clearTimers();
       }
-    }, this.CANDIDATE_PAUSE_MS);
+    }, candidatePause);
 
-    // Timer 2: Hard Timeout (~2800ms)
+    // Timer 2: Hard Timeout
     this.hardTimeoutTimer = window.setTimeout(() => {
       const hasIntent = hasQuestionIntent(trimmed);
       const setup = isSetupFragment(trimmed);
 
-      // Finalize ONLY IF turn contains question intent and is not an incomplete setup fragment
       if (hasIntent && !setup) {
         const intent = this.detectIntent(trimmed);
         onFinalizeCandidate({
@@ -214,7 +225,7 @@ export class SmartQuestionDetector implements QuestionDetector {
         });
       }
       this.clearTimers();
-    }, this.HARD_TIMEOUT_MS);
+    }, hardTimeout);
   }
 
   clearTimers(): void {

@@ -9,19 +9,19 @@ describe("Phase 2 Three Target Questions Validation", () => {
   const testCases = [
     {
       id: "Q1",
-      partial: "Site mở bot hai tuần vẫn chưa nhận keyword...",
+      partialPreamble: "Site mở bot hai tuần vẫn chưa nhận keyword...",
       full: "Site mở bot hai tuần vẫn chưa nhận keyword thì em xử lý thế nào?",
       expectedIntent: "NO_KEYWORD_SIGNAL"
     },
     {
       id: "Q2",
-      partial: "Domain A DR 55 traffic bằng 0, domain B DR 20 nhưng có traffic thật...",
+      partialPreamble: "Domain A DR 55 traffic bằng 0, domain B DR 20 nhưng có traffic thật...",
       full: "Domain A DR 55 traffic bằng 0, domain B DR 20 nhưng có traffic thật và backlink đúng niche. Em chọn con nào?",
       expectedIntent: "DOMAIN_SELECTION"
     },
     {
       id: "Q3",
-      partial: "Trong GSC impressions giảm 5%, click giảm 40%, average position từ 3.2 xuống 6.8...",
+      partialPreamble: "Trong GSC impressions giảm 5%, click giảm 40%, average position từ 3.2 xuống 6.8...",
       full: "Trong GSC impressions giảm 5%, click giảm 40%, average position từ 3.2 xuống 6.8. Em phân tích thế nào?",
       expectedIntent: "GSC_RANKING_DROP"
     }
@@ -29,20 +29,21 @@ describe("Phase 2 Three Target Questions Validation", () => {
 
   testCases.forEach((tc) => {
     it(`validates ${tc.id}: ${tc.full}`, () => {
-      // 1. Partial transcription normalization & intent detection
-      const partialCorrected = corrector.correct(tc.partial, { domain: "seo_igaming_interview" });
-      const partialIntent = classifyQuestionIntent(partialCorrected.correctedText, tc.partial);
+      // 1. Partial preamble speech is protected from premature cutting off
+      const preambleCorrected = corrector.correct(tc.partialPreamble, { domain: "seo_igaming_interview" });
+      const preambleIntent = classifyQuestionIntent(preambleCorrected.correctedText, tc.partialPreamble);
 
-      expect(partialIntent.category).toBe(tc.expectedIntent);
-      expect(isEligibleForSpeculativeAnswer(partialIntent, partialCorrected.correctedText)).toBe(true);
+      expect(preambleIntent.category).toBe(tc.expectedIntent);
+      // Preamble without end marker is protected (false) so interviewer can finish
+      expect(isEligibleForSpeculativeAnswer(preambleIntent, preambleCorrected.correctedText)).toBe(false);
 
-      // 2. Full question normalization & intent consistency (speculative request reused)
+      // 2. Full question normalization & intent consistency
       const fullCorrected = corrector.correct(tc.full, { domain: "seo_igaming_interview" });
       const fullIntent = classifyQuestionIntent(fullCorrected.correctedText, tc.full);
 
       expect(fullIntent.category).toBe(tc.expectedIntent);
-      // Because intent matches, speculative request is reused with exactly ONE Gemini request!
-      expect(partialIntent.category).toBe(fullIntent.category);
+      // Completed question with question marker triggers answer generation
+      expect(isEligibleForSpeculativeAnswer(fullIntent, fullCorrected.correctedText)).toBe(true);
     });
   });
 });

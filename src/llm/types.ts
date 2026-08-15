@@ -16,6 +16,7 @@ export interface AnswerRequest {
   speechLastActivityAt?: number;
   questionIntentReadyAt?: number;
   recentHistory?: ConversationItem[];
+  profile?: import("../shared/candidateProfile").CandidateProfile;
   signal?: AbortSignal;
 }
 

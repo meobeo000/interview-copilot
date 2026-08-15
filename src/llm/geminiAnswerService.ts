@@ -1,7 +1,7 @@
 import type { AnswerDelta, AnswerRequest, AnswerService } from "./types";
 import type { SuggestedAnswer } from "../shared/types";
 import { calculatePipelineMetrics, extractFirstUsefulAnswer, formatPipelineMetricsLog } from "../shared/telemetry";
-import { FAST_SEO_INTERVIEW_SYSTEM_PROMPT } from "./prompts/fastSeoInterviewPrompt";
+import { buildFastSeoInterviewPrompt } from "./prompts/fastSeoInterviewPrompt";
 import { parseStreamingAnswer } from "./parseAnswerJson";
 import { AnswerTraceLogger } from "../shared/answerTrace";
 
@@ -49,7 +49,7 @@ export class GeminiAnswerService implements AnswerService {
     // Fast streaming prompt removes JSON syntax overhead so token 1 is readable Vietnamese text
     const payload = {
       system_instruction: {
-        parts: [{ text: FAST_SEO_INTERVIEW_SYSTEM_PROMPT }]
+        parts: [{ text: buildFastSeoInterviewPrompt(request.profile) }]
       },
       contents: [
         {

@@ -42,9 +42,9 @@ describe("Phase 2: Speculative Answering Unit Tests", () => {
     expect(i2.category).toBe("NO_KEYWORD_SIGNAL");
     expect(i3.category).toBe("NO_KEYWORD_SIGNAL");
 
-    // Both are eligible for speculative answering
-    expect(isEligibleForSpeculativeAnswer(i1, p1)).toBe(true);
-    expect(isEligibleForSpeculativeAnswer(i2, p2)).toBe(true);
+    // Preambles are protected from premature answers; complete question is eligible
+    expect(isEligibleForSpeculativeAnswer(i1, p1)).toBe(false);
+    expect(isEligibleForSpeculativeAnswer(i3, p3)).toBe(true);
   });
 
   it("Test C: Intent change triggers intent transition", () => {

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("copilotWindow", {
   hide: () => ipcRenderer.invoke("window:hide"),
+  setContentProtection: (enabled: boolean) => ipcRenderer.invoke("window:set-content-protection", enabled),
   getDesktopSourceId: () => ipcRenderer.invoke("system-audio:get-source-id"),
   onAnswerNow: (callback: () => void) => {
     const listener = () => callback();
