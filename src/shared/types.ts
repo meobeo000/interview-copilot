@@ -1,3 +1,6 @@
+import type { PipelineTimestamps } from "./telemetry";
+import type { QuestionIntent } from "../question-detector/intentClassifier";
+
 export type AppStatus =
   | "Idle"
   | "Listening"
@@ -20,6 +23,8 @@ export interface ConversationItem {
   answer?: SuggestedAnswer;
   answerProvider?: string;
   answerModel?: string;
+  intent?: QuestionIntent;
+  timestamps?: PipelineTimestamps;
 }
 
 export interface SuggestedAnswer {
@@ -36,6 +41,7 @@ export interface QuestionDetectionResult {
   cleanedQuestion?: string;
   topic?: string;
   reason?: string;
+  intent?: QuestionIntent;
 }
 
 export interface TranscriptChunk {

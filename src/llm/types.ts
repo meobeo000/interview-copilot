@@ -13,6 +13,8 @@ export interface AnswerRequest {
   question: string;
   rawTranscript: string;
   questionCommittedAt?: number;
+  speechLastActivityAt?: number;
+  questionIntentReadyAt?: number;
   recentHistory?: ConversationItem[];
   signal?: AbortSignal;
 }

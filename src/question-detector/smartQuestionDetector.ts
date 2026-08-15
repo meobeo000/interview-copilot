@@ -1,7 +1,18 @@
+import type { QuestionDetectionResult } from "../shared/types";
+import { classifyQuestionIntent, type QuestionIntent } from "./intentClassifier";
+import type { QuestionDetector } from "./types";
+
 export interface QuestionCandidate {
   text: string;
   isComplete: boolean;
   reason?: string;
+  intent?: QuestionIntent;
+}
+
+export interface IntentCandidateEvent {
+  text: string;
+  intent: QuestionIntent;
+  readyAt: number;
 }
 
 const incompleteConjunctions = [
@@ -109,12 +120,31 @@ export function isVietnameseSentenceComplete(text: string): boolean {
   return hasQuestionIntent(text);
 }
 
-export class SmartQuestionDetector {
+export class SmartQuestionDetector implements QuestionDetector {
   private candidateTimer: number | undefined;
   private hardTimeoutTimer: number | undefined;
 
   public CANDIDATE_PAUSE_MS = 1200; // ~800ms - 1800ms
   public HARD_TIMEOUT_MS = 2800; // ~1800ms - 3000ms
+
+  /**
+   * Evaluates semantic intent for the given transcript text.
+   */
+  detectIntent(text: string, rawTranscript?: string): QuestionIntent {
+    return classifyQuestionIntent(text, rawTranscript);
+  }
+
+  async analyze(rawTranscript: string): Promise<QuestionDetectionResult> {
+    const isQ = hasQuestionIntent(rawTranscript) && !isSetupFragment(rawTranscript);
+    const intent = this.detectIntent(rawTranscript, rawTranscript);
+    return {
+      isQuestion: isQ,
+      confidence: isQ ? 0.9 : 0.2,
+      cleanedQuestion: rawTranscript.trim(),
+      topic: intent.category !== "UNKNOWN" ? intent.category : "SEO Question",
+      intent
+    };
+  }
 
   /**
    * Deprecated / Internal helper for tests backward compatibility.
@@ -127,7 +157,8 @@ export class SmartQuestionDetector {
   updateTurn(
     fullText: string,
     onPossibleEnd: () => void,
-    onFinalizeCandidate: (candidate: QuestionCandidate) => void
+    onFinalizeCandidate: (candidate: QuestionCandidate) => void,
+    onIntentCandidate?: (candidate: IntentCandidateEvent) => void
   ): void {
     const trimmed = fullText.trim();
     if (!trimmed) {
@@ -137,16 +168,31 @@ export class SmartQuestionDetector {
     // Reset timers when new speech arrives
     this.clearTimers();
 
+    // Check if immediate candidate intent can be extracted early (before grace window / hard timeout)
+    const isComplete = hasQuestionIntent(trimmed) && !isSetupFragment(trimmed);
+    if (isComplete && onIntentCandidate) {
+      const intent = this.detectIntent(trimmed);
+      if (intent.category !== "UNKNOWN") {
+        onIntentCandidate({
+          text: trimmed,
+          intent,
+          readyAt: Date.now()
+        });
+      }
+    }
+
     // Timer 1: Candidate Pause (~1200ms)
     this.candidateTimer = window.setTimeout(() => {
       onPossibleEnd();
 
       // Only candidate-finalize if turn contains explicit question intent and is not an incomplete setup fragment
       if (hasQuestionIntent(trimmed) && !isSetupFragment(trimmed)) {
+        const intent = this.detectIntent(trimmed);
         onFinalizeCandidate({
           text: trimmed,
           isComplete: true,
-          reason: "Question intent detected at candidate pause."
+          reason: "Question intent detected at candidate pause.",
+          intent
         });
         this.clearTimers();
       }
@@ -159,10 +205,12 @@ export class SmartQuestionDetector {
 
       // Finalize ONLY IF turn contains question intent and is not an incomplete setup fragment
       if (hasIntent && !setup) {
+        const intent = this.detectIntent(trimmed);
         onFinalizeCandidate({
           text: trimmed,
           isComplete: true,
-          reason: "Hard timeout reached for complete question turn."
+          reason: "Hard timeout reached for complete question turn.",
+          intent
         });
       }
       this.clearTimers();

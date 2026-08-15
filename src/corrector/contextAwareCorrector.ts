@@ -42,8 +42,8 @@ export class ContextAwareTranscriptCorrector implements TranscriptCorrector {
     let currentText = input;
     const changes: ChangeDetail[] = [];
 
-    // 1. Ahrefs phonetics: "ai rép", "ai rep", "ai ref", "ah ref"
-    currentText = currentText.replace(/\b(ai\s+rép|ai\s+rep|ai\s+ref|ah\s+ref)\b/gi, (match) => {
+    // 1. Ahrefs phonetics: "ai rép", "ai rep", "ai ref", "ah ref", "a href"
+    currentText = currentText.replace(/\b(ai\s+rép|ai\s+rep|ai\s+ref|ah\s+ref|a\s+href)\b/gi, (match) => {
       changes.push({
         from: match,
         to: "Ahrefs",
@@ -53,8 +53,8 @@ export class ContextAwareTranscriptCorrector implements TranscriptCorrector {
       return "Ahrefs";
     });
 
-    // 2. PBN phonetics: "pi bi en", "pi bi n", "p b n"
-    currentText = currentText.replace(/\b(pi\s+bi\s+en|pi\s+bi\s+n|p\s+b\s+n)\b/gi, (match) => {
+    // 2. PBN phonetics: "pi bi en", "pi bi n", "bi bi en", "p b n"
+    currentText = currentText.replace(/\b(pi\s+bi\s+en|pi\s+bi\s+n|bi\s+bi\s+en|p\s+b\s+n)\b/gi, (match) => {
       changes.push({
         from: match,
         to: "PBN",
@@ -75,7 +75,7 @@ export class ContextAwareTranscriptCorrector implements TranscriptCorrector {
       return "GSC";
     });
 
-    // 4. Core Update phonetics: "co update", "co up date", "core up date"
+    // 4. Core Update phonetics: "core update", "co update", "co up date", "core up date"
     currentText = currentText.replace(/\b(co\s+update|co\s+up\s+date|core\s+up\s+date)\b/gi, (match) => {
       changes.push({
         from: match,
@@ -97,8 +97,8 @@ export class ContextAwareTranscriptCorrector implements TranscriptCorrector {
       return "iGaming";
     });
 
-    // 6. Guest Post phonetics: "guestpost", "gét pót"
-    currentText = currentText.replace(/\b(guestpost|gét\s+pót)\b/gi, (match) => {
+    // 6. Guest Post phonetics: "guestpost", "guest port", "gét pót"
+    currentText = currentText.replace(/\b(guestpost|guest\s+port|gét\s+pót)\b/gi, (match) => {
       changes.push({
         from: match,
         to: "Guest Post",
@@ -108,7 +108,74 @@ export class ContextAwareTranscriptCorrector implements TranscriptCorrector {
       return "Guest Post";
     });
 
-    // 7. Tightened Context-Aware "sai" -> "site" with false-positive protection
+    // 7. Entity phonetics: "en ti ti", "en ti ty"
+    currentText = currentText.replace(/\b(en\s+ti\s+ti|en\s+ti\s+ty)\b/gi, (match) => {
+      changes.push({
+        from: match,
+        to: "Entity",
+        reason: "SEO domain phonetic matching for Entity",
+        confidence: 0.92
+      });
+      return "Entity";
+    });
+
+    // 8. Anchor text phonetics: "an co text", "an co teck", "anco text"
+    currentText = currentText.replace(/\b(an\s+co\s+text|an\s+co\s+teck|anco\s+text)\b/gi, (match) => {
+      changes.push({
+        from: match,
+        to: "anchor text",
+        reason: "SEO domain phonetic matching for anchor text",
+        confidence: 0.93
+      });
+      return "anchor text";
+    });
+
+    // 9. Backlink compound: "back link" -> "backlink"
+    currentText = currentText.replace(/\bback\s+link\b/gi, (match) => {
+      changes.push({
+        from: match,
+        to: "backlink",
+        reason: "SEO compound word normalization for backlink",
+        confidence: 0.95
+      });
+      return "backlink";
+    });
+
+    // 10. Keyword compound: "key word" -> "keyword"
+    currentText = currentText.replace(/\bkey\s+word\b/gi, (match) => {
+      changes.push({
+        from: match,
+        to: "keyword",
+        reason: "SEO compound word normalization for keyword",
+        confidence: 0.95
+      });
+      return "keyword";
+    });
+
+    // 11. Internal link plural/spacing normalization: "internal links" -> "internal link"
+    currentText = currentText.replace(/\binternal\s+links\b/gi, (match) => {
+      changes.push({
+        from: match,
+        to: "internal link",
+        reason: "SEO terminology normalization for internal link",
+        confidence: 0.92
+      });
+      return "internal link";
+    });
+
+    // 12. Context-aware "chưa nhận cây" / "chưa nhận key" -> "chưa nhận keyword"
+    currentText = currentText.replace(/\b(chưa|không|chưa\s+hề)\s+nhận\s+(cây|key)\b/gi, (match, prefix: string) => {
+      const replacement = `${prefix} nhận keyword`;
+      changes.push({
+        from: match,
+        to: replacement,
+        reason: "SEO context phonetic correction (nhận cây/key -> nhận keyword)",
+        confidence: 0.91
+      });
+      return replacement;
+    });
+
+    // 13. Tightened Context-Aware "sai" -> "site" with false-positive protection
     const hasForbiddenPattern = FALSE_POSITIVE_SAI_PATTERNS.some((pattern) => pattern.test(currentText));
 
     if (!hasForbiddenPattern) {
@@ -135,8 +202,8 @@ export class ContextAwareTranscriptCorrector implements TranscriptCorrector {
         return replacement;
       });
 
-      // Specifically "sai mới/vệ tinh/money" -> "site mới/..."
-      currentText = currentText.replace(/\bsai\s+(mới|vệ\s+tinh|money)\b/gi, (match, modifier: string) => {
+      // Specifically "sai mới/vệ tinh/money/mở bot" -> "site mới/..."
+      currentText = currentText.replace(/\bsai\s+(mới|vệ\s+tinh|money|mở\s+bot)\b/gi, (match, modifier: string) => {
         const replacement = `site ${modifier}`;
         changes.push({
           from: match,

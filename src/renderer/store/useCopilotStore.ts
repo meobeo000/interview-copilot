@@ -5,8 +5,15 @@ import type { AudioCapture, AudioFrame } from "../../audio/types";
 import { ContextAwareTranscriptCorrector } from "../../corrector/contextAwareCorrector";
 import { createAnswerService } from "../../llm/factory.browser";
 import type { AnswerDelta } from "../../llm/types";
-import { SmartQuestionDetector } from "../../question-detector/smartQuestionDetector";
+import type { QuestionIntent } from "../../question-detector/intentClassifier";
+import { type IntentCandidateEvent, SmartQuestionDetector } from "../../question-detector/smartQuestionDetector";
 import { capHistory } from "../../shared/history";
+import {
+  calculatePipelineMetrics,
+  extractFirstUsefulAnswer,
+  formatPipelineMetricsLog,
+  type PipelineTimestamps
+} from "../../shared/telemetry";
 import type { AppStatus, ConversationItem, StreamController, SuggestedAnswer } from "../../shared/types";
 import { MockTranscriptService } from "../../transcription/mockTranscriptService";
 import { RealStreamingSTTService } from "../../transcription/realStreamingSTT";
@@ -102,6 +109,7 @@ interface CopilotState {
   cleanedQuestion: string;
   detectedTopic: string;
   questionConfidence?: number;
+  intentCandidate?: IntentCandidateEvent;
   answer: SuggestedAnswer;
   history: ConversationItem[];
   isHistoryOpen: boolean;
@@ -129,11 +137,26 @@ let graceWindowTimer: number | undefined;
 let rawTurnSpeechBuffer = "";
 let correctedTurnSpeechBuffer = "";
 
+// Real-time telemetry tracking buffers
+let turnSpeechLastActivityAt: number | undefined;
+let turnLastSttPartialAt: number | undefined;
+let turnLastSttFinalAt: number | undefined;
+let turnQuestionIntentReadyAt: number | undefined;
+let latestIntentCandidate: QuestionIntent | undefined;
+
 function clearGraceWindow() {
   if (graceWindowTimer !== undefined) {
     window.clearTimeout(graceWindowTimer);
     graceWindowTimer = undefined;
   }
+}
+
+function resetTurnTelemetry() {
+  turnSpeechLastActivityAt = undefined;
+  turnLastSttPartialAt = undefined;
+  turnLastSttFinalAt = undefined;
+  turnQuestionIntentReadyAt = undefined;
+  latestIntentCandidate = undefined;
 }
 
 function handleTranscriptUpdate(
@@ -180,7 +203,16 @@ function evaluateAccumulatedTurn(
       }
     },
     (candidate) => {
+      if (candidate.intent) {
+        latestIntentCandidate = candidate.intent;
+      }
       startGraceWindow(candidate.text, set, get);
+    },
+    (candidateEvent) => {
+      // Record candidate intent timestamp for telemetry and speculative candidate hooks
+      turnQuestionIntentReadyAt = candidateEvent.readyAt;
+      latestIntentCandidate = candidateEvent.intent;
+      set({ intentCandidate: candidateEvent });
     }
   );
 }
@@ -215,6 +247,7 @@ function commitQuestion(
     return;
   }
 
+  const commitTime = Date.now();
   const rawText = rawTurnSpeechBuffer.trim() || correctedText;
   rawTurnSpeechBuffer = "";
   correctedTurnSpeechBuffer = "";
@@ -232,18 +265,33 @@ function commitQuestion(
     liveTranscript: ""
   });
 
+  const intent = latestIntentCandidate ?? smartDetector.detectIntent(correctedText, rawText);
+
+  const timestamps: PipelineTimestamps = {
+    speechLastActivityAt: turnSpeechLastActivityAt ?? commitTime,
+    lastSttPartialAt: turnLastSttPartialAt,
+    lastSttFinalAt: turnLastSttFinalAt,
+    questionIntentReadyAt: turnQuestionIntentReadyAt ?? commitTime,
+    questionCommittedAt: commitTime
+  };
+
   // 4. Create single committed conversation item for the entire turn
   const newItem: ConversationItem = {
     id: crypto.randomUUID(),
-    startedAt: Date.now(),
+    startedAt: commitTime,
     rawTranscript: rawText,
     correctedTranscript: correctedText,
     cleanedQuestion: correctedText,
-    detectedTopic: "Vietnamese SEO Question",
+    detectedTopic: intent.category !== "UNKNOWN" ? intent.category : "Vietnamese SEO Question",
+    intent,
     answerProvider: answerService.providerName,
-    answerModel: answerService.modelName
+    answerModel: answerService.modelName,
+    timestamps
   };
   activeItem = newItem;
+
+  // Reset telemetry buffer for subsequent speech turns
+  resetTurnTelemetry();
 
   // 5. Stream answer for committed question
   void streamAnswerForItem(newItem, set, get).catch((error: unknown) => {
@@ -268,13 +316,20 @@ async function streamAnswerForItem(
     detectedTopic: item.detectedTopic ?? "SEO Question"
   });
 
+  const timestamps: PipelineTimestamps = {
+    ...item.timestamps,
+    answerRequestStartedAt: Date.now()
+  };
+
   let hasError = false;
   try {
     const generator = answerService.streamAnswer({
       questionId: item.id,
       question: item.cleanedQuestion ?? item.rawTranscript,
       rawTranscript: item.rawTranscript,
-      questionCommittedAt: item.startedAt,
+      questionCommittedAt: item.timestamps?.questionCommittedAt ?? item.startedAt,
+      speechLastActivityAt: item.timestamps?.speechLastActivityAt,
+      questionIntentReadyAt: item.timestamps?.questionIntentReadyAt,
       recentHistory: get().history.slice(0, 5)
     });
 
@@ -283,7 +338,20 @@ async function streamAnswerForItem(
       if (activeItem?.id !== item.id) {
         break;
       }
+
+      if (timestamps.firstAnswerTokenAt === undefined) {
+        timestamps.firstAnswerTokenAt = Date.now();
+      }
+
       nextAnswer = applyDelta(nextAnswer, delta);
+
+      if (timestamps.firstUsefulAnswerAt === undefined) {
+        const useful = extractFirstUsefulAnswer(nextAnswer);
+        if (useful) {
+          timestamps.firstUsefulAnswerAt = Date.now();
+        }
+      }
+
       set({ answer: nextAnswer });
     }
   } catch (error) {
@@ -305,10 +373,25 @@ async function streamAnswerForItem(
     return;
   }
 
+  const completedAt = Date.now();
+  timestamps.answerCompletedAt = completedAt;
+  if (timestamps.firstUsefulAnswerAt === undefined) {
+    timestamps.firstUsefulAnswerAt = completedAt;
+  }
+  if (timestamps.firstAnswerTokenAt === undefined) {
+    timestamps.firstAnswerTokenAt = completedAt;
+  }
+
+  const metrics = calculatePipelineMetrics(timestamps);
+  if (answerService.providerName !== "gemini") {
+    console.log(formatPipelineMetricsLog(metrics));
+  }
+
   const completed: ConversationItem = {
     ...item,
     answer: nextAnswer,
-    completedAt: Date.now()
+    completedAt,
+    timestamps
   };
 
   const currentHistory = get().history;
@@ -346,6 +429,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
   cleanedQuestion: "",
   detectedTopic: "",
   questionConfidence: undefined,
+  intentCandidate: undefined,
   answer: emptyAnswer(),
   history: readHistory(),
   isHistoryOpen: false,
@@ -354,6 +438,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     transcriptController?.stop();
     clearGraceWindow();
     smartDetector.reset();
+    resetTurnTelemetry();
 
     activeItem = undefined;
     rawTurnSpeechBuffer = "";
@@ -367,6 +452,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
       cleanedQuestion: "",
       detectedTopic: "",
       questionConfidence: undefined,
+      intentCandidate: undefined,
       answer: emptyAnswer(),
       error: undefined
     });
@@ -376,6 +462,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     void audioCapture
       .start(
         (frame) => {
+          turnSpeechLastActivityAt = frame.capturedAt || Date.now();
           set({ audioLevel: frame.rmsLevel });
           if (typeof activeTranscriptService?.sendAudio === "function") {
             activeTranscriptService.sendAudio(frame);
@@ -402,8 +489,16 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
       });
 
     transcriptController = activeTranscriptService.start({
-      onPartial: (chunk) => handleTranscriptUpdate(chunk.text, set, get),
-      onFinal: (chunk) => handleTranscriptUpdate(chunk.text, set, get),
+      onPartial: (chunk) => {
+        turnLastSttPartialAt = Date.now();
+        turnSpeechLastActivityAt = turnLastSttPartialAt;
+        handleTranscriptUpdate(chunk.text, set, get);
+      },
+      onFinal: (chunk) => {
+        turnLastSttFinalAt = Date.now();
+        turnSpeechLastActivityAt = turnLastSttFinalAt;
+        handleTranscriptUpdate(chunk.text, set, get);
+      },
       onError: (error) => {
         void audioCapture.stop();
         set({ status: "Error", audioLevel: 0, error: error.message });
@@ -421,13 +516,14 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
   pause: () => {
     clearGraceWindow();
     smartDetector.reset();
+    resetTurnTelemetry();
     transcriptController?.stop();
     transcriptController = undefined;
     activeTranscriptService = undefined;
     rawTurnSpeechBuffer = "";
     correctedTurnSpeechBuffer = "";
     void audioCapture.stop();
-    set({ status: "Idle", audioLevel: 0 });
+    set({ status: "Idle", audioLevel: 0, intentCandidate: undefined });
   },
   finalizeQuestionNow: () => {
     const text = get().liveTranscript.trim();

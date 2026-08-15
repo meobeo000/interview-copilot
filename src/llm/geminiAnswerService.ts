@@ -1,7 +1,8 @@
 import type { AnswerDelta, AnswerRequest, AnswerService } from "./types";
 import type { SuggestedAnswer } from "../shared/types";
+import { calculatePipelineMetrics, extractFirstUsefulAnswer, formatPipelineMetricsLog } from "../shared/telemetry";
 import { SEO_INTERVIEW_SYSTEM_PROMPT } from "./prompts/seoInterviewPrompt";
-import { parseAnswerJson } from "./parseAnswerJson";
+import { parseAnswerJson, parsePartialAnswerJson } from "./parseAnswerJson";
 
 export interface GeminiAnswerConfig {
   apiKey: string;
@@ -35,9 +36,13 @@ export class GeminiAnswerService implements AnswerService {
       throw new Error("Gemini Answer configuration error: GEMINI_API_KEY is missing. Check .env file.");
     }
 
-    const questionCommittedAt = request.questionCommittedAt ?? Date.now();
-    let networkTTFT: number | undefined;
-    let visibleTTFA: number | undefined;
+    const geminiRequestStartedAt = Date.now();
+    const questionCommittedAt = request.questionCommittedAt ?? geminiRequestStartedAt;
+    const speechLastActivityAt = request.speechLastActivityAt ?? questionCommittedAt;
+    const questionIntentReadyAt = request.questionIntentReadyAt ?? questionCommittedAt;
+
+    let firstAnswerTokenAt: number | undefined;
+    let firstUsefulAnswerAt: number | undefined;
     let answerCompletedAt: number | undefined;
 
     const payload = {
@@ -58,8 +63,6 @@ export class GeminiAnswerService implements AnswerService {
     };
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.modelName)}:streamGenerateContent?alt=sse`;
-
-    const geminiRequestStartedAt = Date.now();
 
     let response: Response;
     try {
@@ -132,8 +135,8 @@ export class GeminiAnswerService implements AnswerService {
         break;
       }
 
-      if (networkTTFT === undefined) {
-        networkTTFT = Date.now() - geminiRequestStartedAt;
+      if (firstAnswerTokenAt === undefined) {
+        firstAnswerTokenAt = Date.now();
       }
 
       buffer += decoder.decode(value, { stream: true });
@@ -161,9 +164,16 @@ export class GeminiAnswerService implements AnswerService {
               for (const part of parts) {
                 if (part.text) {
                   accumulatedText += part.text;
-                  if (visibleTTFA === undefined && accumulatedText.trim()) {
-                    visibleTTFA = Date.now() - questionCommittedAt;
+
+                  // Audit first useful answer: must not be raw JSON syntax/keys/whitespace
+                  if (firstUsefulAnswerAt === undefined) {
+                    const parsedPartial = parsePartialAnswerJson(accumulatedText);
+                    const useful = extractFirstUsefulAnswer(parsedPartial) || extractFirstUsefulAnswer(accumulatedText);
+                    if (useful) {
+                      firstUsefulAnswerAt = Date.now();
+                    }
                   }
+
                   // Yield progressive accumulatedText chunk
                   yield { type: "chunk", accumulatedText };
                 }
@@ -176,16 +186,21 @@ export class GeminiAnswerService implements AnswerService {
       }
     }
 
-    const commitToRequest = geminiRequestStartedAt - questionCommittedAt;
-    const networkTTFTMs = networkTTFT ?? 0;
-    const commitToVisibleAnswerMs = visibleTTFA ?? (answerCompletedAt ? answerCompletedAt - questionCommittedAt : 0);
-    const totalGenMs = answerCompletedAt ? answerCompletedAt - geminiRequestStartedAt : 0;
+    answerCompletedAt = answerCompletedAt ?? Date.now();
+    firstAnswerTokenAt = firstAnswerTokenAt ?? answerCompletedAt;
+    firstUsefulAnswerAt = firstUsefulAnswerAt ?? answerCompletedAt;
 
-    console.log(`[ANSWER LATENCY]`);
-    console.log(`commitToRequest: ${commitToRequest} ms`);
-    console.log(`networkTTFT: ${networkTTFTMs} ms`);
-    console.log(`commitToVisibleAnswer: ${commitToVisibleAnswerMs} ms`);
-    console.log(`totalGeneration: ${totalGenMs} ms`);
+    const metrics = calculatePipelineMetrics({
+      speechLastActivityAt,
+      questionIntentReadyAt,
+      questionCommittedAt,
+      answerRequestStartedAt: geminiRequestStartedAt,
+      firstAnswerTokenAt,
+      firstUsefulAnswerAt,
+      answerCompletedAt
+    });
+
+    console.log(formatPipelineMetricsLog(metrics));
 
     const finalAnswer = parseAnswerJson(accumulatedText);
 
