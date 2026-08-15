@@ -1,24 +1,32 @@
 import type { SuggestedAnswer } from "./types";
 
+export type LatencyPipelineMode = "speculativeReused" | "speculativeReplaced" | "normalCommitted";
+
 export interface PipelineTimestamps {
   speechLastActivityAt?: number;
   lastSttPartialAt?: number;
   lastSttFinalAt?: number;
   questionIntentReadyAt?: number;
+  intentCandidateAt?: number;
+  speculativeRequestStartedAt?: number;
   questionCommittedAt?: number;
   answerRequestStartedAt?: number;
   firstAnswerTokenAt?: number;
   firstUsefulAnswerAt?: number;
   answerCompletedAt?: number;
+  mode?: LatencyPipelineMode;
 }
 
 export interface PipelineLatencyMetrics {
+  mode?: LatencyPipelineMode;
   speechEndToIntent?: number;
   speechEndToCommit?: number;
   intentToRequest?: number;
+  intentToSpeculativeRequest?: number;
   requestToFirstToken?: number;
   speechEndToFirstToken?: number;
   speechEndToFirstUsefulAnswer?: number;
+  questionCommitAfterAnswerStarted?: number;
   totalAnswerGeneration?: number;
 }
 
@@ -29,26 +37,33 @@ export function calculatePipelineMetrics(
   timestamps: PipelineTimestamps
 ): PipelineLatencyMetrics {
   const speechEnd = timestamps.speechLastActivityAt ?? timestamps.lastSttFinalAt ?? timestamps.lastSttPartialAt;
-  const intentReady = timestamps.questionIntentReadyAt;
+  const intentReady = timestamps.questionIntentReadyAt ?? timestamps.intentCandidateAt;
   const committed = timestamps.questionCommittedAt;
-  const requestStart = timestamps.answerRequestStartedAt;
+  const requestStart = timestamps.speculativeRequestStartedAt ?? timestamps.answerRequestStartedAt;
   const firstToken = timestamps.firstAnswerTokenAt;
   const firstUseful = timestamps.firstUsefulAnswerAt;
   const answerCompleted = timestamps.answerCompletedAt;
 
   return {
+    mode: timestamps.mode,
     speechEndToIntent:
       speechEnd !== undefined && intentReady !== undefined ? Math.max(0, intentReady - speechEnd) : undefined,
     speechEndToCommit:
       speechEnd !== undefined && committed !== undefined ? Math.max(0, committed - speechEnd) : undefined,
     intentToRequest:
       intentReady !== undefined && requestStart !== undefined ? Math.max(0, requestStart - intentReady) : undefined,
+    intentToSpeculativeRequest:
+      intentReady !== undefined && timestamps.speculativeRequestStartedAt !== undefined
+        ? Math.max(0, timestamps.speculativeRequestStartedAt - intentReady)
+        : undefined,
     requestToFirstToken:
       requestStart !== undefined && firstToken !== undefined ? Math.max(0, firstToken - requestStart) : undefined,
     speechEndToFirstToken:
       speechEnd !== undefined && firstToken !== undefined ? Math.max(0, firstToken - speechEnd) : undefined,
     speechEndToFirstUsefulAnswer:
       speechEnd !== undefined && firstUseful !== undefined ? Math.max(0, firstUseful - speechEnd) : undefined,
+    questionCommitAfterAnswerStarted:
+      committed !== undefined && requestStart !== undefined ? Math.max(0, committed - requestStart) : undefined,
     totalAnswerGeneration:
       requestStart !== undefined && answerCompleted !== undefined
         ? Math.max(0, answerCompleted - requestStart)
@@ -61,16 +76,29 @@ export function calculatePipelineMetrics(
  */
 export function formatPipelineMetricsLog(metrics: PipelineLatencyMetrics): string {
   const fmt = (v?: number) => (v !== undefined ? `${v} ms` : "N/A");
-  return [
-    "[INTERVIEW LATENCY]",
-    `speechEndToIntent: ${fmt(metrics.speechEndToIntent)}`,
-    `speechEndToCommit: ${fmt(metrics.speechEndToCommit)}`,
-    `intentToRequest: ${fmt(metrics.intentToRequest)}`,
-    `requestToFirstToken: ${fmt(metrics.requestToFirstToken)}`,
-    `speechEndToFirstToken: ${fmt(metrics.speechEndToFirstToken)}`,
-    `speechEndToFirstUsefulAnswer: ${fmt(metrics.speechEndToFirstUsefulAnswer)}`,
-    `totalAnswerGeneration: ${fmt(metrics.totalAnswerGeneration)}`
-  ].join("\n");
+  const lines = ["[INTERVIEW LATENCY]"];
+
+  if (metrics.mode) {
+    lines.push(`mode: ${metrics.mode}`);
+  }
+  lines.push(`speechEndToIntent: ${fmt(metrics.speechEndToIntent)}`);
+  if (metrics.intentToSpeculativeRequest !== undefined) {
+    lines.push(`intentToSpeculativeRequest: ${fmt(metrics.intentToSpeculativeRequest)}`);
+  } else {
+    lines.push(`intentToRequest: ${fmt(metrics.intentToRequest)}`);
+  }
+  if (metrics.speechEndToCommit !== undefined) {
+    lines.push(`speechEndToCommit: ${fmt(metrics.speechEndToCommit)}`);
+  }
+  lines.push(`requestToFirstToken: ${fmt(metrics.requestToFirstToken)}`);
+  lines.push(`speechEndToFirstToken: ${fmt(metrics.speechEndToFirstToken)}`);
+  lines.push(`speechEndToFirstUsefulAnswer: ${fmt(metrics.speechEndToFirstUsefulAnswer)}`);
+  if (metrics.questionCommitAfterAnswerStarted !== undefined && metrics.mode?.startsWith("speculative")) {
+    lines.push(`questionCommitAfterAnswerStarted: ${fmt(metrics.questionCommitAfterAnswerStarted)}`);
+  }
+  lines.push(`totalAnswerGeneration: ${fmt(metrics.totalAnswerGeneration)}`);
+
+  return lines.join("\n");
 }
 
 /**

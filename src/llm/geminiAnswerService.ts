@@ -1,8 +1,8 @@
 import type { AnswerDelta, AnswerRequest, AnswerService } from "./types";
 import type { SuggestedAnswer } from "../shared/types";
 import { calculatePipelineMetrics, extractFirstUsefulAnswer, formatPipelineMetricsLog } from "../shared/telemetry";
-import { SEO_INTERVIEW_SYSTEM_PROMPT } from "./prompts/seoInterviewPrompt";
-import { parseAnswerJson, parsePartialAnswerJson } from "./parseAnswerJson";
+import { FAST_SEO_INTERVIEW_SYSTEM_PROMPT } from "./prompts/fastSeoInterviewPrompt";
+import { parseStreamingAnswer } from "./parseAnswerJson";
 
 export interface GeminiAnswerConfig {
   apiKey: string;
@@ -45,9 +45,10 @@ export class GeminiAnswerService implements AnswerService {
     let firstUsefulAnswerAt: number | undefined;
     let answerCompletedAt: number | undefined;
 
+    // Fast streaming prompt removes JSON syntax overhead so token 1 is readable Vietnamese text
     const payload = {
       system_instruction: {
-        parts: [{ text: SEO_INTERVIEW_SYSTEM_PROMPT }]
+        parts: [{ text: FAST_SEO_INTERVIEW_SYSTEM_PROMPT }]
       },
       contents: [
         {
@@ -56,9 +57,8 @@ export class GeminiAnswerService implements AnswerService {
         }
       ],
       generationConfig: {
-        temperature: 0.3,
-        maxOutputTokens: 350,
-        responseMimeType: "application/json"
+        temperature: 0.2,
+        maxOutputTokens: 250
       }
     };
 
@@ -167,7 +167,7 @@ export class GeminiAnswerService implements AnswerService {
 
                   // Audit first useful answer: must not be raw JSON syntax/keys/whitespace
                   if (firstUsefulAnswerAt === undefined) {
-                    const parsedPartial = parsePartialAnswerJson(accumulatedText);
+                    const parsedPartial = parseStreamingAnswer(accumulatedText);
                     const useful = extractFirstUsefulAnswer(parsedPartial) || extractFirstUsefulAnswer(accumulatedText);
                     if (useful) {
                       firstUsefulAnswerAt = Date.now();
@@ -202,7 +202,7 @@ export class GeminiAnswerService implements AnswerService {
 
     console.log(formatPipelineMetricsLog(metrics));
 
-    const finalAnswer = parseAnswerJson(accumulatedText);
+    const finalAnswer = parseStreamingAnswer(accumulatedText);
 
     // Yield final structured answer payload
     yield { type: "finalAnswer", answer: finalAnswer };

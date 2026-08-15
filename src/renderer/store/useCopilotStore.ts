@@ -5,8 +5,9 @@ import type { AudioCapture, AudioFrame } from "../../audio/types";
 import { ContextAwareTranscriptCorrector } from "../../corrector/contextAwareCorrector";
 import { createAnswerService } from "../../llm/factory.browser";
 import type { AnswerDelta } from "../../llm/types";
-import type { QuestionIntent } from "../../question-detector/intentClassifier";
+import type { QuestionIntent, QuestionIntentCategory } from "../../question-detector/intentClassifier";
 import { type IntentCandidateEvent, SmartQuestionDetector } from "../../question-detector/smartQuestionDetector";
+import { isEligibleForSpeculativeAnswer, isSpeculativeEnabled } from "../../question-detector/speculativeConfig";
 import { capHistory } from "../../shared/history";
 import {
   calculatePipelineMetrics,
@@ -19,7 +20,7 @@ import { MockTranscriptService } from "../../transcription/mockTranscriptService
 import { RealStreamingSTTService } from "../../transcription/realStreamingSTT";
 import type { TranscriptionService } from "../../transcription/types";
 
-import { parsePartialAnswerJson } from "../../llm/parseAnswerJson";
+import { parseStreamingAnswer } from "../../llm/parseAnswerJson";
 
 const historyKey = "interview-copilot.history.v1";
 
@@ -49,7 +50,7 @@ function writeHistory(items: ConversationItem[]) {
 
 function applyDelta(answer: SuggestedAnswer, delta: AnswerDelta): SuggestedAnswer {
   if (delta.type === "chunk") {
-    const parsed = parsePartialAnswerJson(delta.accumulatedText);
+    const parsed = parseStreamingAnswer(delta.accumulatedText);
     return {
       ...answer,
       openingLine: parsed.openingLine || answer.openingLine,
@@ -123,6 +124,18 @@ interface CopilotState {
   hideOverlay: () => Promise<void>;
 }
 
+interface ActiveSpeculativeRequest {
+  requestId: string;
+  intentCategory: QuestionIntentCategory;
+  normalizedQuestion: string;
+  rawTranscript: string;
+  startedAt: number;
+  abortController: AbortController;
+  status: "streaming" | "completed" | "aborted";
+  answer: SuggestedAnswer;
+  timestamps: PipelineTimestamps;
+}
+
 const answerService = createAnswerService();
 const audioCapture = createAudioCapture();
 const smartDetector = new SmartQuestionDetector();
@@ -133,6 +146,7 @@ let activeTranscriptService:
   | undefined;
 let transcriptController: StreamController | undefined;
 let activeItem: ConversationItem | undefined;
+let activeSpeculative: ActiveSpeculativeRequest | undefined;
 let graceWindowTimer: number | undefined;
 let rawTurnSpeechBuffer = "";
 let correctedTurnSpeechBuffer = "";
@@ -159,6 +173,14 @@ function resetTurnTelemetry() {
   latestIntentCandidate = undefined;
 }
 
+function abortActiveSpeculative() {
+  if (activeSpeculative) {
+    activeSpeculative.abortController.abort();
+    activeSpeculative.status = "aborted";
+    activeSpeculative = undefined;
+  }
+}
+
 function handleTranscriptUpdate(
   rawText: string,
   set: (partial: Partial<CopilotState>) => void,
@@ -174,11 +196,11 @@ function handleTranscriptUpdate(
   if (currentStatus === "FinalizingQuestion" || currentStatus === "PossibleEnd") {
     clearGraceWindow();
     set({ status: "Listening", liveTranscript: correctedTurnSpeechBuffer });
-  } else {
+  } else if (currentStatus !== "Answering") {
     set({ liveTranscript: correctedTurnSpeechBuffer });
   }
 
-  // While answering, accumulate speech for next turn without triggering turn detection
+  // While answering committed or speculative answer, accumulate speech for next turn without triggering turn detection
   if (currentStatus === "Answering") {
     return;
   }
@@ -213,8 +235,135 @@ function evaluateAccumulatedTurn(
       turnQuestionIntentReadyAt = candidateEvent.readyAt;
       latestIntentCandidate = candidateEvent.intent;
       set({ intentCandidate: candidateEvent });
+
+      // PHASE 2 SPECULATIVE ANSWERING TRIGGER
+      if (isSpeculativeEnabled() && isEligibleForSpeculativeAnswer(candidateEvent.intent, candidateEvent.text)) {
+        handleSpeculativeTrigger(candidateEvent, set, get);
+      }
     }
   );
+}
+
+function handleSpeculativeTrigger(
+  candidateEvent: IntentCandidateEvent,
+  set: (partial: Partial<CopilotState>) => void,
+  get: () => CopilotState
+) {
+  if (get().status === "Answering") {
+    return;
+  }
+
+  // Request deduplication: If active speculative request exists
+  if (activeSpeculative) {
+    if (activeSpeculative.status !== "aborted" && activeSpeculative.intentCategory === candidateEvent.intent.category) {
+      // Same intent: Deduplicate and do nothing (re-use existing stream)
+      return;
+    }
+    // Intent shifted: abort previous speculative request and replace with new one
+    abortActiveSpeculative();
+  }
+
+  // Start new speculative stream
+  startSpeculativeStream(candidateEvent, set, get);
+}
+
+function startSpeculativeStream(
+  candidateEvent: IntentCandidateEvent,
+  set: (partial: Partial<CopilotState>) => void,
+  get: () => CopilotState
+) {
+  const requestId = crypto.randomUUID();
+  const abortController = new AbortController();
+  const startedAt = Date.now();
+
+  const timestamps: PipelineTimestamps = {
+    speechLastActivityAt: turnSpeechLastActivityAt ?? startedAt,
+    lastSttPartialAt: turnLastSttPartialAt,
+    lastSttFinalAt: turnLastSttFinalAt,
+    intentCandidateAt: candidateEvent.readyAt,
+    questionIntentReadyAt: candidateEvent.readyAt,
+    speculativeRequestStartedAt: startedAt,
+    answerRequestStartedAt: startedAt,
+    mode: "speculativeReused"
+  };
+
+  const req: ActiveSpeculativeRequest = {
+    requestId,
+    intentCategory: candidateEvent.intent.category,
+    normalizedQuestion: candidateEvent.text,
+    rawTranscript: rawTurnSpeechBuffer.trim() || candidateEvent.text,
+    startedAt,
+    abortController,
+    status: "streaming",
+    answer: emptyAnswer(),
+    timestamps
+  };
+
+  activeSpeculative = req;
+
+  // Stream directly into answer panel without "speculative" badge
+  set({
+    status: "Answering",
+    answer: emptyAnswer(),
+    rawQuestion: req.rawTranscript,
+    cleanedQuestion: req.normalizedQuestion,
+    detectedTopic: candidateEvent.intent.category
+  });
+
+  void (async () => {
+    let nextAnswer = emptyAnswer();
+    try {
+      const generator = answerService.streamAnswer({
+        questionId: requestId,
+        question: req.normalizedQuestion,
+        rawTranscript: req.rawTranscript,
+        questionCommittedAt: startedAt,
+        speechLastActivityAt: timestamps.speechLastActivityAt,
+        questionIntentReadyAt: timestamps.questionIntentReadyAt,
+        recentHistory: get().history.slice(0, 5),
+        signal: abortController.signal
+      });
+
+      for await (const delta of generator) {
+        if (activeSpeculative?.requestId !== requestId || abortController.signal.aborted) {
+          break;
+        }
+
+        if (timestamps.firstAnswerTokenAt === undefined) {
+          timestamps.firstAnswerTokenAt = Date.now();
+        }
+
+        nextAnswer = applyDelta(nextAnswer, delta);
+        req.answer = nextAnswer;
+
+        if (timestamps.firstUsefulAnswerAt === undefined) {
+          const useful = extractFirstUsefulAnswer(nextAnswer);
+          if (useful) {
+            timestamps.firstUsefulAnswerAt = Date.now();
+          }
+        }
+
+        if (activeSpeculative?.requestId === requestId) {
+          set({ answer: nextAnswer });
+        }
+      }
+
+      if (activeSpeculative?.requestId === requestId) {
+        req.status = "completed";
+        timestamps.answerCompletedAt = Date.now();
+
+        // If this speculative request has been promoted to committed activeItem, finalize history
+        if (activeItem && activeItem.id === requestId) {
+          finalizeCommittedItem(activeItem, nextAnswer, set, get);
+        }
+      }
+    } catch {
+      if (abortController.signal.aborted || activeSpeculative?.requestId !== requestId) {
+        return;
+      }
+      req.status = "aborted";
+    }
+  })();
 }
 
 function startGraceWindow(
@@ -223,7 +372,7 @@ function startGraceWindow(
   get: () => CopilotState
 ) {
   const text = questionText.trim();
-  if (!text || get().status === "FinalizingQuestion" || get().status === "Answering") {
+  if (!text || get().status === "FinalizingQuestion") {
     return;
   }
 
@@ -265,41 +414,139 @@ function commitQuestion(
     liveTranscript: ""
   });
 
-  const intent = latestIntentCandidate ?? smartDetector.detectIntent(correctedText, rawText);
+  const finalIntent = smartDetector.detectIntent(correctedText, rawText);
+
+  // Check if we can REUSE the active speculative request
+  const canReuseSpeculative =
+    isSpeculativeEnabled() &&
+    activeSpeculative !== undefined &&
+    activeSpeculative.status !== "aborted" &&
+    (activeSpeculative.intentCategory === finalIntent.category ||
+      finalIntent.category === "STRATEGY_PLAN" ||
+      finalIntent.category === "UNKNOWN");
+
+  if (canReuseSpeculative && activeSpeculative) {
+    const spec = activeSpeculative;
+    spec.timestamps.questionCommittedAt = commitTime;
+    spec.timestamps.mode = "speculativeReused";
+
+    const newItem: ConversationItem = {
+      id: spec.requestId,
+      startedAt: spec.startedAt,
+      rawTranscript: rawText,
+      correctedTranscript: correctedText,
+      cleanedQuestion: correctedText,
+      detectedTopic: spec.intentCategory !== "UNKNOWN" ? spec.intentCategory : "Vietnamese SEO Question",
+      intent: finalIntent.category !== "UNKNOWN" ? finalIntent : latestIntentCandidate,
+      answerProvider: answerService.providerName,
+      answerModel: answerService.modelName,
+      answer: spec.answer,
+      timestamps: spec.timestamps
+    };
+
+    activeItem = newItem;
+    resetTurnTelemetry();
+
+    // If speculative stream already finished before commit, record to history and finish turn
+    if (spec.status === "completed") {
+      finalizeCommittedItem(newItem, spec.answer, set, get);
+    } else {
+      // If still streaming, set activeItem; the streaming loop will finalize on completion
+      set({
+        status: "Answering",
+        rawQuestion: newItem.rawTranscript,
+        cleanedQuestion: newItem.cleanedQuestion,
+        detectedTopic: newItem.detectedTopic
+      });
+    }
+    return;
+  }
+
+  // Otherwise: Cancel any stale speculative request and start fresh stream
+  const wasSpeculativeAborted = activeSpeculative !== undefined;
+  abortActiveSpeculative();
 
   const timestamps: PipelineTimestamps = {
     speechLastActivityAt: turnSpeechLastActivityAt ?? commitTime,
     lastSttPartialAt: turnLastSttPartialAt,
     lastSttFinalAt: turnLastSttFinalAt,
     questionIntentReadyAt: turnQuestionIntentReadyAt ?? commitTime,
-    questionCommittedAt: commitTime
+    questionCommittedAt: commitTime,
+    mode: wasSpeculativeAborted ? "speculativeReplaced" : "normalCommitted"
   };
 
-  // 4. Create single committed conversation item for the entire turn
   const newItem: ConversationItem = {
     id: crypto.randomUUID(),
     startedAt: commitTime,
     rawTranscript: rawText,
     correctedTranscript: correctedText,
     cleanedQuestion: correctedText,
-    detectedTopic: intent.category !== "UNKNOWN" ? intent.category : "Vietnamese SEO Question",
-    intent,
+    detectedTopic: finalIntent.category !== "UNKNOWN" ? finalIntent.category : "Vietnamese SEO Question",
+    intent: finalIntent,
     answerProvider: answerService.providerName,
     answerModel: answerService.modelName,
     timestamps
   };
   activeItem = newItem;
 
-  // Reset telemetry buffer for subsequent speech turns
   resetTurnTelemetry();
 
-  // 5. Stream answer for committed question
   void streamAnswerForItem(newItem, set, get).catch((error: unknown) => {
     set({
       status: "Error",
       error: error instanceof Error ? error.message : "Answer stream failed."
     });
   });
+}
+
+function finalizeCommittedItem(
+  item: ConversationItem,
+  finalAnswer: SuggestedAnswer,
+  set: (partial: Partial<CopilotState>) => void,
+  get: () => CopilotState
+) {
+  const completedAt = Date.now();
+  if (item.timestamps) {
+    item.timestamps.answerCompletedAt = completedAt;
+    if (item.timestamps.firstUsefulAnswerAt === undefined) {
+      item.timestamps.firstUsefulAnswerAt = completedAt;
+    }
+    if (item.timestamps.firstAnswerTokenAt === undefined) {
+      item.timestamps.firstAnswerTokenAt = completedAt;
+    }
+    const metrics = calculatePipelineMetrics(item.timestamps);
+    if (answerService.providerName !== "gemini") {
+      console.log(formatPipelineMetricsLog(metrics));
+    }
+  }
+
+  const completed: ConversationItem = {
+    ...item,
+    answer: finalAnswer,
+    completedAt
+  };
+
+  const currentHistory = get().history;
+  const existingIndex = currentHistory.findIndex((h) => h.id === completed.id);
+  let nextHistory: ConversationItem[];
+  if (existingIndex >= 0) {
+    nextHistory = [...currentHistory];
+    nextHistory[existingIndex] = completed;
+  } else {
+    nextHistory = [completed, ...currentHistory];
+  }
+
+  const history = capHistory(nextHistory);
+  writeHistory(history);
+
+  activeSpeculative = undefined;
+  activeItem = undefined;
+
+  set({ status: "Listening", history });
+
+  if (correctedTurnSpeechBuffer.trim()) {
+    evaluateAccumulatedTurn(set, get);
+  }
 }
 
 async function streamAnswerForItem(
@@ -373,52 +620,7 @@ async function streamAnswerForItem(
     return;
   }
 
-  const completedAt = Date.now();
-  timestamps.answerCompletedAt = completedAt;
-  if (timestamps.firstUsefulAnswerAt === undefined) {
-    timestamps.firstUsefulAnswerAt = completedAt;
-  }
-  if (timestamps.firstAnswerTokenAt === undefined) {
-    timestamps.firstAnswerTokenAt = completedAt;
-  }
-
-  const metrics = calculatePipelineMetrics(timestamps);
-  if (answerService.providerName !== "gemini") {
-    console.log(formatPipelineMetricsLog(metrics));
-  }
-
-  const completed: ConversationItem = {
-    ...item,
-    answer: nextAnswer,
-    completedAt,
-    timestamps
-  };
-
-  const currentHistory = get().history;
-  const existingIndex = currentHistory.findIndex((h) => h.id === completed.id);
-  let nextHistory: ConversationItem[];
-  if (existingIndex >= 0) {
-    nextHistory = [...currentHistory];
-    nextHistory[existingIndex] = completed;
-  } else {
-    nextHistory = [completed, ...currentHistory];
-  }
-
-  const history = capHistory(nextHistory);
-  writeHistory(history);
-
-  if (activeItem?.id === item.id) {
-    activeItem = completed;
-    // Transition back to Listening state if no error
-    if (get().status === "Answering") {
-      set({ status: "Listening", history });
-    }
-  }
-
-  // Evaluate any speech collected during answer streaming for the next turn
-  if (correctedTurnSpeechBuffer.trim()) {
-    evaluateAccumulatedTurn(set, get);
-  }
+  finalizeCommittedItem({ ...item, timestamps }, nextAnswer, set, get);
 }
 
 export const useCopilotStore = create<CopilotState>((set, get) => ({
@@ -437,6 +639,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
   startListening: () => {
     transcriptController?.stop();
     clearGraceWindow();
+    abortActiveSpeculative();
     smartDetector.reset();
     resetTurnTelemetry();
 
@@ -515,6 +718,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
   },
   pause: () => {
     clearGraceWindow();
+    abortActiveSpeculative();
     smartDetector.reset();
     resetTurnTelemetry();
     transcriptController?.stop();

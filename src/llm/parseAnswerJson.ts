@@ -1,6 +1,81 @@
 import type { SuggestedAnswer } from "../shared/types";
 
 /**
+ * Parses clean streaming text protocol from fast LLM answers:
+ * Line 1: Direct opening line
+ * Lines 2+: - Action bullet
+ *
+ * Also falls back transparently to JSON if the response is formatted as JSON.
+ */
+export function parseStreamingAnswer(rawText: string): SuggestedAnswer {
+  if (!rawText || !rawText.trim()) {
+    return {
+      openingLine: "",
+      bullets: [],
+      keywords: [],
+      confidence: 0.95
+    };
+  }
+
+  const trimmed = rawText.trim();
+
+  // If payload appears to be JSON, use JSON partial parser
+  if (trimmed.startsWith("{") || trimmed.includes('"openingLine"')) {
+    return parsePartialAnswerJson(rawText);
+  }
+
+  // Parse text streaming format
+  const rawLines = rawText.split("\n");
+  let openingLine = "";
+  const bullets: string[] = [];
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i].trim();
+    if (!line) {
+      continue;
+    }
+
+    // Check if line is a bullet item
+    if (/^[-*•\d.]+\s+/.test(line)) {
+      const cleanBullet = line.replace(/^[-*•\d.]+\s+/, "").trim();
+      if (cleanBullet) {
+        bullets.push(cleanBullet);
+      }
+    } else if (!openingLine) {
+      // First non-bullet line is the opening line
+      openingLine = line.replace(/^[#>*"\s]+/, "").replace(/["\s]+$/, "");
+    } else if (bullets.length === 0) {
+      // Continuation of opening line before bullets start
+      openingLine += " " + line;
+    } else {
+      // Continuation or un-bulleted remark
+      bullets.push(line);
+    }
+  }
+
+  // Extract any obvious SEO keywords for tags metadata
+  const keywords: string[] = [];
+  const keywordMatches = rawText.match(/\b(GSC|GA4|Ahrefs|PBN|Guest Post|Entity|Core Update|301|DR|backlink|keyword|traffic)\b/gi);
+  if (keywordMatches) {
+    for (const kw of keywordMatches) {
+      const normalizedKw = kw.toUpperCase() === "GSC" || kw.toUpperCase() === "PBN" || kw.toUpperCase() === "GA4" || kw.toUpperCase() === "DR"
+        ? kw.toUpperCase()
+        : kw;
+      if (!keywords.some((k) => k.toLowerCase() === normalizedKw.toLowerCase()) && keywords.length < 4) {
+        keywords.push(normalizedKw);
+      }
+    }
+  }
+
+  return {
+    openingLine: openingLine || (bullets[0] ? "" : trimmed),
+    bullets,
+    keywords: keywords.length > 0 ? keywords : ["SEO", "Live"],
+    confidence: 0.95
+  };
+}
+
+/**
  * Parses full or partial JSON text streamed from LLMs (Gemini / Groq / OpenAI).
  * Safely extracts openingLine, bullets, and keywords without throwing syntax errors
  * or leaking raw JSON structural tokens ({}, [], key names, quotes) onto the UI.
@@ -78,12 +153,7 @@ export function parsePartialAnswerJson(rawJsonText: string): SuggestedAnswer {
 
   // 5. Fallback for non-JSON plain text streaming
   if (!openingLine && bullets.length === 0 && !rawJsonText.trim().startsWith("{")) {
-    const lines = rawJsonText
-      .split("\n")
-      .map((l) => l.trim().replace(/^[-*•\d.]+\s*/, ""))
-      .filter(Boolean);
-    openingLine = lines[0] || rawJsonText;
-    bullets.push(...lines.slice(1));
+    return parseStreamingAnswer(rawJsonText);
   }
 
   return {
