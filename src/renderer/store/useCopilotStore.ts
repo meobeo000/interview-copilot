@@ -12,6 +12,8 @@ import { MockTranscriptService } from "../../transcription/mockTranscriptService
 import { RealStreamingSTTService } from "../../transcription/realStreamingSTT";
 import type { TranscriptionService } from "../../transcription/types";
 
+import { parsePartialAnswerJson } from "../../llm/parseAnswerJson";
+
 const historyKey = "interview-copilot.history.v1";
 
 function emptyAnswer(): SuggestedAnswer {
@@ -40,7 +42,14 @@ function writeHistory(items: ConversationItem[]) {
 
 function applyDelta(answer: SuggestedAnswer, delta: AnswerDelta): SuggestedAnswer {
   if (delta.type === "chunk") {
-    return { ...answer, streamingText: delta.accumulatedText };
+    const parsed = parsePartialAnswerJson(delta.accumulatedText);
+    return {
+      ...answer,
+      openingLine: parsed.openingLine || answer.openingLine,
+      bullets: parsed.bullets.length > 0 ? parsed.bullets : answer.bullets,
+      keywords: parsed.keywords.length > 0 ? parsed.keywords : answer.keywords,
+      streamingText: undefined
+    };
   }
 
   if (delta.type === "finalAnswer") {

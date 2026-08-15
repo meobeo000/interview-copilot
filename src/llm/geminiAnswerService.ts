@@ -1,6 +1,7 @@
 import type { AnswerDelta, AnswerRequest, AnswerService } from "./types";
 import type { SuggestedAnswer } from "../shared/types";
 import { SEO_INTERVIEW_SYSTEM_PROMPT } from "./prompts/seoInterviewPrompt";
+import { parseAnswerJson } from "./parseAnswerJson";
 
 export interface GeminiAnswerConfig {
   apiKey: string;
@@ -12,36 +13,6 @@ export function readGeminiAnswerConfig(env: Record<string, string | undefined> =
   const model = (env.GEMINI_ANSWER_MODEL || process.env.GEMINI_ANSWER_MODEL)?.trim() || "gemini-flash-latest";
 
   return { apiKey, model };
-}
-
-function parseAnswerJson(rawJsonText: string): SuggestedAnswer {
-  try {
-    const parsed = JSON.parse(rawJsonText) as {
-      openingLine?: string;
-      bullets?: string[];
-      keywords?: string[];
-    };
-
-    return {
-      openingLine: parsed.openingLine || "Em xin trả lời câu hỏi của anh như sau:",
-      bullets: Array.isArray(parsed.bullets) ? parsed.bullets : [],
-      keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
-      confidence: 0.95
-    };
-  } catch {
-    // If partial or non-strict JSON output occurs, return raw text split by bullet lines
-    const lines = rawJsonText
-      .split("\n")
-      .map((l) => l.trim().replace(/^[-*•\d.]+\s*/, ""))
-      .filter(Boolean);
-
-    return {
-      openingLine: lines[0] || rawJsonText || "Em xin trả lời câu hỏi của anh:",
-      bullets: lines.slice(1),
-      keywords: ["SEO", "Strategy"],
-      confidence: 0.85
-    };
-  }
 }
 
 export class GeminiAnswerService implements AnswerService {
@@ -81,7 +52,7 @@ export class GeminiAnswerService implements AnswerService {
       ],
       generationConfig: {
         temperature: 0.3,
-        maxOutputTokens: 600,
+        maxOutputTokens: 350,
         responseMimeType: "application/json"
       }
     };

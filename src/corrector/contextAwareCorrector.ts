@@ -86,8 +86,8 @@ export class ContextAwareTranscriptCorrector implements TranscriptCorrector {
       return "Core Update";
     });
 
-    // 5. iGaming phonetics: "i gaming", "igaming"
-    currentText = currentText.replace(/\b(i\s+gaming|igaming)\b/gi, (match) => {
+    // 5. iGaming phonetics: "i gaming", "igaming", "in gaming"
+    currentText = currentText.replace(/\b(i\s+gaming|igaming|in\s+gaming)\b/gi, (match) => {
       changes.push({
         from: match,
         to: "iGaming",

@@ -13,35 +13,7 @@ export function readGroqAnswerConfig(env: Record<string, string | undefined> = p
   return { apiKey, model };
 }
 
-function parseAnswerJson(rawJsonText: string): SuggestedAnswer {
-  try {
-    const parsed = JSON.parse(rawJsonText) as {
-      openingLine?: string;
-      bullets?: string[];
-      keywords?: string[];
-    };
-
-    return {
-      openingLine: parsed.openingLine || "Em xin trả lời câu hỏi của anh như sau:",
-      bullets: Array.isArray(parsed.bullets) ? parsed.bullets : [],
-      keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
-      confidence: 0.95
-    };
-  } catch {
-    // If partial or non-strict JSON output occurs, return raw text split by bullet lines
-    const lines = rawJsonText
-      .split("\n")
-      .map((l) => l.trim().replace(/^[-*•\d.]+\s*/, ""))
-      .filter(Boolean);
-
-    return {
-      openingLine: lines[0] || rawJsonText || "Em xin trả lời câu hỏi của anh:",
-      bullets: lines.slice(1),
-      keywords: ["SEO", "Strategy"],
-      confidence: 0.85
-    };
-  }
-}
+import { parseAnswerJson } from "./parseAnswerJson";
 
 export class GroqAnswerService implements AnswerService {
   readonly providerName = "groq";
