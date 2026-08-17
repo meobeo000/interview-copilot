@@ -14,6 +14,7 @@
     "diagnostic:speculative": "npx tsx src/diagnostics/speculativeDiagnostic.ts",
     "diagnostic:turn-assembly": "npx tsx src/diagnostics/turnAssemblyDiagnostic.ts",
     "diagnostic:answer-contract": "npx tsx src/diagnostics/answerContractDiagnostic.ts",
+    "diagnostic:interview-stress": "npx tsx src/diagnostics/interviewStressDiagnostic.ts",
     "test": "vitest run",
     "build": "tsc -p tsconfig.node.json && vite build"
   },
