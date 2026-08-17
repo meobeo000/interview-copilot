@@ -81,7 +81,7 @@ export class GeminiAnswerService implements AnswerService {
 
     if (typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
       console.log(
-        `[ANSWER CONTRACT]\nquestionId: ${request.questionId}\nintent: ${contract.intent}\nanswerType: ${contract.answerType}\nrequiredEntities: ${JSON.stringify(contract.requiredEntities)}\nrequiredFacts: ${JSON.stringify(contract.requiredFacts)}\ncontractBuildMs: ${contract.contractBuildMs} ms`
+        `[ANSWER CONTRACT]\nquestionId: ${request.questionId}\nintent: ${contract.intent}\nanswerType: ${contract.answerType}\ncandidateExperienceAllowed: ${contract.candidateExperienceAllowed}\ncandidateExperienceTopics: ${JSON.stringify(contract.candidateExperience.supportedTopics)}\nallocationGrounding: ${contract.allocationGrounding ?? "N/A"}\ngroundedFactCount: ${contract.groundedFacts.length}\ngroundedSourceTypes: ${JSON.stringify(Array.from(new Set(contract.groundedFacts.map((f) => f.sourceType))))}\nrequiredEntities: ${JSON.stringify(contract.requiredEntities)}\ncontractBuildMs: ${contract.contractBuildMs} ms`
       );
     }
 
