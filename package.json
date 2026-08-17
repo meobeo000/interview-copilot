@@ -13,6 +13,7 @@
     "diagnostic:gemini": "npx tsx src/diagnostics/geminiDiagnostic.ts",
     "diagnostic:speculative": "npx tsx src/diagnostics/speculativeDiagnostic.ts",
     "diagnostic:turn-assembly": "npx tsx src/diagnostics/turnAssemblyDiagnostic.ts",
+    "diagnostic:answer-contract": "npx tsx src/diagnostics/answerContractDiagnostic.ts",
     "test": "vitest run",
     "build": "tsc -p tsconfig.node.json && vite build"
   },

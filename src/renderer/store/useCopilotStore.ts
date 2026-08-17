@@ -23,6 +23,7 @@ import { RealStreamingSTTService } from "../../transcription/realStreamingSTT";
 import type { TranscriptionService } from "../../transcription/types";
 import { parseStreamingAnswer } from "../../llm/parseAnswerJson";
 import { type CandidateProfile, loadCandidateProfile, saveCandidateProfile } from "../../shared/candidateProfile";
+import { buildAnswerContract, isContractCompatible, type AnswerContract } from "../../llm/answerContract";
 
 const historyKey = "interview-copilot.history.v1";
 
@@ -147,6 +148,7 @@ export interface ActiveSpeculativeSession {
   status: "prewarming" | "streaming" | "completed" | "aborted";
   answer: SuggestedAnswer;
   bufferedText: string;
+  contract?: AnswerContract;
   timestamps: PipelineTimestamps;
 }
 
@@ -239,9 +241,10 @@ function resetTurnTelemetry() {
 }
 
 export function isSpeculativeSessionReusable(
-  session: Pick<ActiveSpeculativeSession, "turnId" | "status" | "intentCategory"> | undefined,
+  session: Pick<ActiveSpeculativeSession, "turnId" | "status" | "intentCategory" | "contract"> | undefined,
   currentTurnId: string,
-  finalIntent: QuestionIntentCategory
+  finalIntent: QuestionIntentCategory,
+  finalContract?: AnswerContract
 ): boolean {
   if (!isSpeculativeEnabled() || !session || session.status === "aborted") {
     return false;
@@ -249,6 +252,13 @@ export function isSpeculativeSessionReusable(
 
   if (session.turnId !== currentTurnId) {
     return false;
+  }
+
+  if (session.contract && finalContract) {
+    const check = isContractCompatible(session.contract, finalContract);
+    if (!check.compatible) {
+      return false;
+    }
   }
 
   return (
@@ -457,6 +467,14 @@ function startSpeculativePrewarmStream(
     timestamps
   };
 
+  const provisionalContract = buildAnswerContract({
+    question: session.normalizedQuestion,
+    intent: eligibility.intent,
+    semanticEvidence: evidenceState,
+    candidateProfile: get().candidateProfile
+  });
+  session.contract = provisionalContract;
+
   activeSpeculative = session;
 
   logSpeculativePrewarmEvent({
@@ -495,6 +513,8 @@ function startSpeculativePrewarmStream(
           normalizedQuestion: session.normalizedQuestion,
           evidence: evidenceState.seoEntities
         },
+        contract: provisionalContract,
+        semanticEvidence: evidenceState,
         signal: abortController.signal
       });
 
@@ -596,10 +616,17 @@ function commitQuestion(
   const latestIntent = latestIntentCandidate;
   logFinalSemanticEvidence(evidenceSnapshot, finalIntent);
 
+  const finalContract = buildAnswerContract({
+    question: correctedText,
+    intent: finalIntent,
+    semanticEvidence: evidenceSnapshot,
+    candidateProfile: get().candidateProfile
+  });
+
   // Check if we can REUSE the active speculative request
   const speculativeAtCommit = activeSpeculative;
   const hadSpeculativeAtCommit = speculativeAtCommit !== undefined;
-  const canReuseSpeculative = isSpeculativeSessionReusable(speculativeAtCommit, finalTurnId, finalIntent.category);
+  const canReuseSpeculative = isSpeculativeSessionReusable(speculativeAtCommit, finalTurnId, finalIntent.category, finalContract);
 
   if (speculativeAtCommit && speculativeAtCommit.turnId !== finalTurnId) {
     logSpeculativePrewarmEvent({
@@ -828,6 +855,12 @@ async function streamAnswerForItem(
 
   let hasError = false;
   try {
+    const contract = buildAnswerContract({
+      question: item.cleanedQuestion ?? item.rawTranscript,
+      intent: item.intent,
+      candidateProfile: get().candidateProfile
+    });
+
     const generator = answerService.streamAnswer({
       questionId: item.id,
       question: item.cleanedQuestion ?? item.rawTranscript,
@@ -838,7 +871,8 @@ async function streamAnswerForItem(
       questionIntentReadyAt: item.timestamps?.questionIntentReadyAt,
       recentHistory: get().history.slice(0, 5),
       profile: get().candidateProfile,
-      intent: item.intent
+      intent: item.intent,
+      contract
     });
 
     for await (const delta of generator) {

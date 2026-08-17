@@ -6,6 +6,7 @@ import { parseStreamingAnswer } from "./parseAnswerJson";
 import { AnswerTraceLogger } from "../shared/answerTrace";
 import { getKnowledgeRetriever } from "../knowledge/knowledgeRetriever";
 import { buildAnswerKnowledgeContext } from "../knowledge/answerKnowledgeContextBuilder";
+import { buildAnswerContract } from "./answerContract";
 
 export interface GeminiAnswerConfig {
   apiKey: string;
@@ -67,15 +68,38 @@ export class GeminiAnswerService implements AnswerService {
       });
     const contextBuildElapsedMs = Math.max(0, Date.now() - contextBuildStart);
 
+    // 1. Build AnswerContract describing WHAT Gemini must answer (< 5ms)
+    const contract =
+      request.contract ||
+      buildAnswerContract({
+        question: request.question,
+        intent: request.intent,
+        semanticEvidence: request.semanticEvidence,
+        retrievedChunks: retrieved.chunks,
+        candidateProfile: request.profile
+      });
+
+    if (typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
+      console.log(
+        `[ANSWER CONTRACT]\nquestionId: ${request.questionId}\nintent: ${contract.intent}\nanswerType: ${contract.answerType}\nrequiredEntities: ${JSON.stringify(contract.requiredEntities)}\nrequiredFacts: ${JSON.stringify(contract.requiredFacts)}\ncontractBuildMs: ${contract.contractBuildMs} ms`
+      );
+    }
+
     // Fast streaming prompt removes JSON syntax overhead so token 1 is readable Vietnamese text
+    const promptText = buildFastSeoInterviewPrompt(request.profile, knowledgeContext, contract);
+    const userContentText =
+      contract.requiredFacts.length > 0 || contract.requiredEntities.length > 0
+        ? `[INTERVIEW QUESTION & STRUCTURED FACTS]:\nIntent: ${contract.intent}\nFacts: ${contract.requiredFacts.join("; ") || "Standard"}\nEntities: ${contract.requiredEntities.join(", ") || "Standard"}\nSpoken Transcript: "${request.question}"`
+        : `Interviewer Question:\n"${request.question}"`;
+
     const payload = {
       system_instruction: {
-        parts: [{ text: buildFastSeoInterviewPrompt(request.profile, knowledgeContext) }]
+        parts: [{ text: promptText }]
       },
       contents: [
         {
           role: "user",
-          parts: [{ text: `Interviewer Question:\n"${request.question}"` }]
+          parts: [{ text: userContentText }]
         }
       ],
       generationConfig: {

@@ -24,6 +24,8 @@ export interface AnswerRequest {
   intent?: QuestionIntent | string;
   retrievedChunks?: KnowledgeChunk[];
   knowledgeContext?: string;
+  contract?: import("./answerContract").AnswerContract;
+  semanticEvidence?: import("../question-detector/semanticEvidence").SemanticEvidenceState;
   signal?: AbortSignal;
 }
 

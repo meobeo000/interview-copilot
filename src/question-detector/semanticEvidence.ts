@@ -128,7 +128,8 @@ export function extractMoneyEvidence(text: string): string[] {
     for (const m of matches) {
       const fullMatch = `${m[1]} ${m[2]}`.trim();
       let normalized = fullMatch;
-      for (const [spoken, num] of Object.entries(SPOKEN_NUMBER_MAP)) {
+      const sortedSpokenEntries = Object.entries(SPOKEN_NUMBER_MAP).sort((a, b) => b[0].length - a[0].length);
+      for (const [spoken, num] of sortedSpokenEntries) {
         if (normalized.toLowerCase().startsWith(spoken)) {
           normalized = normalized.toLowerCase().replace(spoken, String(num));
           break;
@@ -161,6 +162,19 @@ export function extractDrValues(text: string): number[] {
       values.push(val);
     }
   }
+
+  const spokenMatches = text.matchAll(/(?:^|\s)(?:DR|dr)\s*(năm mươi lăm|hai mươi lăm|ba mươi lăm|bốn mươi lăm|sáu mươi lăm|bảy mươi lăm|tám mươi lăm|chín mươi lăm|hai mươi|ba mươi|bốn mươi|năm mươi|sáu mươi|bảy mươi|tám mươi|chín mươi|mười)(?=\s|$|[.,?!])/gi);
+  for (const sm of spokenMatches) {
+    const raw = sm[1].toLowerCase();
+    if (raw === "năm mươi lăm") {
+      values.push(55);
+    } else if (raw === "hai mươi lăm") {
+      values.push(25);
+    } else if (SPOKEN_NUMBER_MAP[raw] !== undefined) {
+      values.push(SPOKEN_NUMBER_MAP[raw]);
+    }
+  }
+
   return Array.from(new Set(values));
 }
 
