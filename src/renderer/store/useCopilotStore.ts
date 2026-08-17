@@ -159,6 +159,7 @@ interface SpeculativePrewarmLogPayload {
   prewarmStartedAt?: number;
   speechEndedAt?: number;
   leadTimeMs?: number;
+  prewarmLeadTimeMs?: number;
   requestId?: string;
   reused?: boolean;
   replaced?: boolean;
@@ -182,6 +183,7 @@ function logSpeculativePrewarmEvent(payload: SpeculativePrewarmLogPayload) {
   if (payload.prewarmStartedAt !== undefined) lines.push(`prewarmStartedAt: ${payload.prewarmStartedAt}`);
   if (payload.speechEndedAt !== undefined) lines.push(`speechEndedAt: ${payload.speechEndedAt}`);
   if (payload.leadTimeMs !== undefined) lines.push(`leadTimeMs: ${payload.leadTimeMs} ms`);
+  if (payload.prewarmLeadTimeMs !== undefined) lines.push(`prewarmLeadTimeMs: ${payload.prewarmLeadTimeMs} ms`);
 
   if (payload.requestId) lines.push(`requestId: ${payload.requestId}`);
   if (payload.reused !== undefined) lines.push(`reused: ${payload.reused}`);
@@ -214,6 +216,7 @@ let correctedTurnSpeechBuffer = "";
 
 // Real-time telemetry tracking buffers
 let turnSpeechLastActivityAt: number | undefined;
+let turnSpeechEndedAt: number | undefined;
 let turnLastSttPartialAt: number | undefined;
 let turnLastSttFinalAt: number | undefined;
 let turnQuestionIntentReadyAt: number | undefined;
@@ -228,10 +231,63 @@ function clearGraceWindow() {
 
 function resetTurnTelemetry() {
   turnSpeechLastActivityAt = undefined;
+  turnSpeechEndedAt = undefined;
   turnLastSttPartialAt = undefined;
   turnLastSttFinalAt = undefined;
   turnQuestionIntentReadyAt = undefined;
   latestIntentCandidate = undefined;
+}
+
+export function isSpeculativeSessionReusable(
+  session: Pick<ActiveSpeculativeSession, "turnId" | "status" | "intentCategory"> | undefined,
+  currentTurnId: string,
+  finalIntent: QuestionIntentCategory
+): boolean {
+  if (!isSpeculativeEnabled() || !session || session.status === "aborted") {
+    return false;
+  }
+
+  if (session.turnId !== currentTurnId) {
+    return false;
+  }
+
+  return (
+    session.intentCategory === finalIntent ||
+    (session.intentCategory !== "UNKNOWN" && (finalIntent === "STRATEGY_PLAN" || finalIntent === "UNKNOWN"))
+  );
+}
+
+function snapshotSemanticEvidence(state: SemanticEvidenceState): SemanticEvidenceState {
+  return {
+    ...state,
+    rawPartials: [...state.rawPartials],
+    numbers: [...state.numbers],
+    percentages: [...state.percentages],
+    moneyAmounts: [...state.moneyAmounts],
+    durations: [...state.durations],
+    positions: [...state.positions],
+    drValues: [...state.drValues],
+    seoEntities: [...state.seoEntities],
+    actionSignals: [...state.actionSignals],
+    comparisonSignals: [...state.comparisonSignals],
+    allocationSignals: [...state.allocationSignals],
+    rankingSignals: [...state.rankingSignals],
+    indexingSignals: [...state.indexingSignals],
+    intentScores: state.intentScores.map((score) => ({ ...score, signals: { ...score.signals }, evidenceTokens: [...score.evidenceTokens] }))
+  };
+}
+
+function logFinalSemanticEvidence(state: SemanticEvidenceState, intent: QuestionIntent): void {
+  if (typeof process !== "undefined" && process.env?.NODE_ENV === "test") {
+    return;
+  }
+  if (typeof process !== "undefined" && process.env?.DEBUG_SEMANTIC_EVIDENCE !== "true") {
+    return;
+  }
+
+  console.log(
+    `[SEMANTIC FINAL]\nturnId: ${state.turnId}\nintent: ${intent.category}\nconfidence: ${intent.confidence.toFixed(2)}\nevidence: ${JSON.stringify(state.seoEntities)}`
+  );
 }
 
 function abortActiveSpeculative() {
@@ -319,6 +375,24 @@ function handleSpeculativePrewarmTrigger(
   }
 
   // Request deduplication: If active speculative request exists
+  if (activeSpeculative) {
+    if (activeSpeculative.turnId !== evidenceState.turnId) {
+      logSpeculativePrewarmEvent({
+        turnId: activeSpeculative.turnId || "unknown-turn",
+        intent: activeSpeculative.intentCategory,
+        confidence: activeSpeculative.intentConfidence,
+        eligible: false,
+        reason: `Stale speculative turn ${activeSpeculative.turnId || "unknown"} does not match current turn ${evidenceState.turnId}`,
+        prewarmStartedAt: activeSpeculative.startedAt,
+        requestId: activeSpeculative.requestId,
+        reused: false,
+        replaced: true,
+        cancelled: true
+      });
+      abortActiveSpeculative();
+    }
+  }
+
   if (activeSpeculative) {
     if (
       activeSpeculative.status !== "aborted" &&
@@ -451,6 +525,7 @@ function startSpeculativePrewarmStream(
 
         // If this speculative session was promoted to the committed visible answer, render progressive chunks
         if (activeItem && activeItem.id === requestId) {
+          timestamps.firstVisibleAnswerAt ??= Date.now();
           set({ answer: nextAnswer });
         }
       }
@@ -495,8 +570,13 @@ function startGraceWindow(
 function commitQuestion(
   questionText: string,
   set: (partial: Partial<CopilotState>) => void,
-  get: () => CopilotState
+  get: () => CopilotState,
+  providerSpeechEndedAt?: number
 ) {
+  if (get().status === "Answering") {
+    return;
+  }
+
   clearGraceWindow();
   const correctedText = questionText.trim();
   if (!correctedText) {
@@ -505,42 +585,59 @@ function commitQuestion(
 
   const commitTime = Date.now();
   const rawText = rawTurnSpeechBuffer.trim() || correctedText;
-  rawTurnSpeechBuffer = "";
-  correctedTurnSpeechBuffer = "";
+  const evidenceSnapshot = snapshotSemanticEvidence(smartDetector.getEvidenceState());
+  const finalIntent = smartDetector.detectIntent(correctedText, rawText);
+  const finalTurnId = evidenceSnapshot.turnId;
+  const speechEndedAt = providerSpeechEndedAt ?? turnSpeechEndedAt;
+  const speechLastActivityAt = turnSpeechLastActivityAt;
+  const lastSttPartialAt = turnLastSttPartialAt;
+  const lastSttFinalAt = turnLastSttFinalAt;
+  const questionIntentReadyAt = turnQuestionIntentReadyAt;
+  const latestIntent = latestIntentCandidate;
+  logFinalSemanticEvidence(evidenceSnapshot, finalIntent);
 
-  // 1. Reset smart detector
+  // Check if we can REUSE the active speculative request
+  const speculativeAtCommit = activeSpeculative;
+  const hadSpeculativeAtCommit = speculativeAtCommit !== undefined;
+  const canReuseSpeculative = isSpeculativeSessionReusable(speculativeAtCommit, finalTurnId, finalIntent.category);
+
+  if (speculativeAtCommit && speculativeAtCommit.turnId !== finalTurnId) {
+    logSpeculativePrewarmEvent({
+      turnId: speculativeAtCommit.turnId || "unknown-turn",
+      intent: speculativeAtCommit.intentCategory,
+      confidence: speculativeAtCommit.intentConfidence,
+      eligible: false,
+      reason: `Stale speculative turn ${speculativeAtCommit.turnId || "unknown"} does not match committed turn ${finalTurnId}`,
+      prewarmStartedAt: speculativeAtCommit.startedAt,
+      requestId: speculativeAtCommit.requestId,
+      reused: false,
+      replaced: true,
+      cancelled: true
+    });
+    abortActiveSpeculative();
+  }
+
+  // Reset only after final intent and speculative ownership have been decided.
   smartDetector.reset();
-
-  // 2. Clear current turn buffer on STT service while keeping WebSocket session alive
   if (typeof activeTranscriptService?.resetTurn === "function") {
     activeTranscriptService.resetTurn();
   }
+  rawTurnSpeechBuffer = "";
+  correctedTurnSpeechBuffer = "";
+  resetTurnTelemetry();
+  set({ liveTranscript: "" });
 
-  // 3. Clear liveTranscript for the new turn
-  set({
-    liveTranscript: ""
-  });
-
-  const finalIntent = smartDetector.detectIntent(correctedText, rawText);
-
-  // Check if we can REUSE the active speculative request
-  const canReuseSpeculative =
-    isSpeculativeEnabled() &&
-    activeSpeculative !== undefined &&
-    activeSpeculative.status !== "aborted" &&
-    (activeSpeculative.intentCategory === finalIntent.category ||
-      (activeSpeculative.intentCategory !== "UNKNOWN" &&
-        (finalIntent.category === "STRATEGY_PLAN" || finalIntent.category === "UNKNOWN")));
-
-  if (canReuseSpeculative && activeSpeculative) {
-    const spec = activeSpeculative;
+  if (canReuseSpeculative && speculativeAtCommit) {
+    const spec = speculativeAtCommit;
     spec.timestamps.questionCommittedAt = commitTime;
+    const resolvedSpeechEndedAt = speechEndedAt ?? commitTime;
+    spec.timestamps.speechEndedAt = resolvedSpeechEndedAt;
     spec.timestamps.mode = "speculativeReused";
 
-    const speechEndedAt = spec.timestamps.speechLastActivityAt ?? commitTime;
     const firstVisibleAnswerAt = Date.now();
-    const leadTimeMs = Math.max(0, speechEndedAt - spec.startedAt);
-    const speechEndToFirstVisibleAnswerMs = Math.max(0, firstVisibleAnswerAt - speechEndedAt);
+    spec.timestamps.firstVisibleAnswerAt = firstVisibleAnswerAt;
+    const prewarmLeadTimeMs = Math.max(0, resolvedSpeechEndedAt - spec.startedAt);
+    const speechEndToFirstVisibleAnswerMs = Math.max(0, firstVisibleAnswerAt - resolvedSpeechEndedAt);
     const geminiTtftMs =
       spec.timestamps.firstAnswerTokenAt !== undefined
         ? Math.max(0, spec.timestamps.firstAnswerTokenAt - spec.startedAt)
@@ -553,8 +650,9 @@ function commitQuestion(
       eligible: true,
       reason: "Speculative prewarm session reused successfully at speech commit",
       prewarmStartedAt: spec.startedAt,
-      speechEndedAt,
-      leadTimeMs,
+      speechEndedAt: resolvedSpeechEndedAt,
+      leadTimeMs: prewarmLeadTimeMs,
+      prewarmLeadTimeMs,
       requestId: spec.requestId,
       reused: true,
       replaced: false,
@@ -573,7 +671,7 @@ function commitQuestion(
       intent:
         finalIntent.category !== "UNKNOWN"
           ? finalIntent
-          : (latestIntentCandidate ?? {
+          : (latestIntent ?? {
               category: spec.intentCategory,
               confidence: spec.intentConfidence,
               normalizedQuestion: correctedText,
@@ -605,7 +703,7 @@ function commitQuestion(
   }
 
   // Otherwise: Cancel any stale speculative request and start fresh stream
-  const wasSpeculativeAborted = activeSpeculative !== undefined;
+  const wasSpeculativeAborted = hadSpeculativeAtCommit;
   if (wasSpeculativeAborted && activeSpeculative) {
     logSpeculativePrewarmEvent({
       turnId: activeSpeculative.turnId || "replaced-turn",
@@ -623,10 +721,11 @@ function commitQuestion(
   abortActiveSpeculative();
 
   const timestamps: PipelineTimestamps = {
-    speechLastActivityAt: turnSpeechLastActivityAt ?? commitTime,
-    lastSttPartialAt: turnLastSttPartialAt,
-    lastSttFinalAt: turnLastSttFinalAt,
-    questionIntentReadyAt: turnQuestionIntentReadyAt ?? commitTime,
+    speechLastActivityAt: speechLastActivityAt ?? commitTime,
+    speechEndedAt: speechEndedAt ?? commitTime,
+    lastSttPartialAt,
+    lastSttFinalAt,
+    questionIntentReadyAt: questionIntentReadyAt ?? commitTime,
     questionCommittedAt: commitTime,
     mode: wasSpeculativeAborted ? "speculativeReplaced" : "normalCommitted"
   };
@@ -735,6 +834,7 @@ async function streamAnswerForItem(
       rawTranscript: item.rawTranscript,
       questionCommittedAt: item.timestamps?.questionCommittedAt ?? item.startedAt,
       speechLastActivityAt: item.timestamps?.speechLastActivityAt,
+      speechEndedAt: item.timestamps?.speechEndedAt,
       questionIntentReadyAt: item.timestamps?.questionIntentReadyAt,
       recentHistory: get().history.slice(0, 5),
       profile: get().candidateProfile,
@@ -750,6 +850,7 @@ async function streamAnswerForItem(
       if (timestamps.firstAnswerTokenAt === undefined) {
         timestamps.firstAnswerTokenAt = Date.now();
       }
+      timestamps.firstVisibleAnswerAt ??= Date.now();
 
       nextAnswer = applyDelta(nextAnswer, delta);
 
@@ -866,14 +967,19 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
         handleTranscriptUpdate(chunk.text, set, get);
       },
       onSpeechFinal: (chunk) => {
-        turnLastSttFinalAt = Date.now();
-        turnSpeechLastActivityAt = turnLastSttFinalAt;
+        const speechEndedAt = chunk.completedAt ?? Date.now();
+        turnSpeechEndedAt = speechEndedAt;
+        turnLastSttFinalAt = speechEndedAt;
+        turnSpeechLastActivityAt = speechEndedAt;
         handleTranscriptUpdate(chunk.text, set, get);
         smartDetector.triggerSpeechFinal(chunk.text, (candidate) => {
+          if (get().status === "Answering") {
+            return;
+          }
           if (candidate.intent) {
             latestIntentCandidate = candidate.intent;
           }
-          startGraceWindow(candidate.text, set, get);
+          commitQuestion(candidate.text, set, get, speechEndedAt);
         });
       },
       onError: (error) => {

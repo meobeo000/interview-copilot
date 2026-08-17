@@ -110,6 +110,9 @@ describe("DeepgramStreamingSttProvider Nova-3 Keyterms", () => {
     expect(requestedUrl).toContain("encoding=linear16");
     expect(requestedUrl).toContain("sample_rate=16000");
     expect(requestedUrl).toContain("interim_results=true");
+    expect(requestedUrl).not.toContain("endpointing=");
+    expect(requestedUrl).not.toContain("utterance_end_ms=");
+    expect(requestedUrl).not.toContain("vad_events=");
 
     // Must use keyterm= parameters
     expect(requestedUrl).toContain("keyterm=site");
@@ -155,6 +158,39 @@ describe("DeepgramStreamingSttProvider Nova-3 Keyterms", () => {
     // Stop session
     await provider.stopSession();
     expect(fakeWs.sentData).toContain(JSON.stringify({ type: "CloseStream" }));
+  });
+
+  it("maps both configured speech_final and defensive UtteranceEnd endpoint events", async () => {
+    const fakeWs = new FakeWebSocket();
+    const provider = new DeepgramStreamingSttProvider(
+      readDeepgramSttConfig({ DEEPGRAM_API_KEY: "mock-key" }),
+      vi.fn(() => fakeWs as unknown as WebSocket)
+    );
+    const onSpeechFinal = vi.fn();
+
+    const startPromise = provider.startSession({
+      onPartial: vi.fn(),
+      onFinal: vi.fn(),
+      onSpeechFinal,
+      onError: vi.fn()
+    });
+    fakeWs.emit("open");
+    await startPromise;
+
+    fakeWs.emit(
+      "message",
+      Buffer.from(JSON.stringify({
+        type: "Results",
+        is_final: true,
+        speech_final: true,
+        channel: { alternatives: [{ transcript: "20 triệu phân bổ content PBN" }] }
+      }))
+    );
+    fakeWs.emit("message", Buffer.from(JSON.stringify({ type: "UtteranceEnd", channel: [0], last_word_end: 2.5 })));
+
+    expect(onSpeechFinal).toHaveBeenCalledTimes(2);
+    expect(onSpeechFinal).toHaveBeenNthCalledWith(1, "20 triệu phân bổ content PBN");
+    expect(onSpeechFinal).toHaveBeenNthCalledWith(2);
   });
 
   it("omits keyterm= parameters when STT_DEEPGRAM_KEYTERMS=false", async () => {

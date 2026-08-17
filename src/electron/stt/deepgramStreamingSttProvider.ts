@@ -113,12 +113,18 @@ export class DeepgramStreamingSttProvider implements StreamingSttProvider {
             channel?: { alternatives?: Array<{ transcript?: string }> };
           };
 
+          const transcript = response.channel?.alternatives?.[0]?.transcript?.trim();
+
           if (response.type === "UtteranceEnd") {
+            logDeepgramEndpointEvent("UtteranceEnd", response.is_final === true, Boolean(transcript));
             this.callbacks?.onSpeechFinal?.();
             return;
           }
 
-          const transcript = response.channel?.alternatives?.[0]?.transcript?.trim();
+          if (response.speech_final) {
+            logDeepgramEndpointEvent("speech_final", response.is_final === true, Boolean(transcript));
+          }
+
           if (!transcript) {
             if (response.speech_final) {
               this.callbacks?.onSpeechFinal?.();
@@ -200,6 +206,16 @@ export class DeepgramStreamingSttProvider implements StreamingSttProvider {
     }
     this.ws = undefined;
   }
+}
+
+function logDeepgramEndpointEvent(event: "speech_final" | "UtteranceEnd", isFinal: boolean, hasTranscript: boolean): void {
+  if (typeof process !== "undefined" && process.env?.NODE_ENV === "test") {
+    return;
+  }
+
+  console.log(
+    `[DEEPGRAM ENDPOINT]\nevent: ${event}\nis_final: ${isFinal}\nhasTranscript: ${hasTranscript}\ntimestamp: ${new Date().toISOString()}`
+  );
 }
 
 

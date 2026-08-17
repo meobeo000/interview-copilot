@@ -131,6 +131,12 @@ STT_PROVIDER=deepgram npm run dev
 
 On Windows PowerShell, set `$env:STT_PROVIDER` for the process instead. `VITE_USE_MOCK_STT=true` remains a renderer test mode and is not an automatic fallback for a real provider failure.
 
+## Deepgram Endpoint Audit
+
+The Deepgram WebSocket request currently enables `interim_results=true` and does not set `endpointing`, `utterance_end_ms`, or `vad_events` explicitly. The provider still handles `speech_final` responses and defensively handles `UtteranceEnd`, but `UtteranceEnd` is not a reliable configured signal until `utterance_end_ms` is enabled. The existing 1.8 second grace timer remains the safe fallback for inferred question completion.
+
+Development logs emit a concise `[DEEPGRAM ENDPOINT]` block with the event name, `is_final`, transcript presence, and timestamp. No audio or credentials are logged.
+
 ## Known Limitations
 
 - Google credentials, Speech-to-Text API enablement, billing, IAM permission, network access, and an eligible Chirp 3 region are required for live Google transcription.

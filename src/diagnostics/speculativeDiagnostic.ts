@@ -65,6 +65,10 @@ async function runSpeculativeDiagnostic() {
     firstVisibleAnswerAt !== undefined && speechEndedAt !== undefined
       ? Math.max(0, firstVisibleAnswerAt - speechEndedAt)
       : 0;
+  const prewarmLeadTimeMs =
+    prewarmStartedAt !== undefined && speechEndedAt !== undefined
+      ? Math.max(0, speechEndedAt - prewarmStartedAt)
+      : 0;
 
   console.log("\n============================================");
   console.log("[SPECULATIVE DIAGNOSTIC SUMMARY]");
@@ -73,6 +77,7 @@ async function runSpeculativeDiagnostic() {
   console.log(`prewarmStartedAt: +${prewarmStartedAt}ms`);
   console.log(`geminiFirstChunkAt: +${simulatedGeminiFirstChunkAt}ms`);
   console.log(`speechEndedAt: +${speechEndedAt}ms`);
+  console.log(`prewarmLeadTimeMs: ${prewarmLeadTimeMs} ms`);
   console.log(`firstVisibleAnswerAt: +${firstVisibleAnswerAt}ms`);
   console.log(`speechEndToFirstVisibleAnswerMs: ${speechEndToFirstVisibleAnswerMs} ms`);
   console.log(`speculativeReused: ${speculativeReused}`);

@@ -17,6 +17,7 @@ export interface AnswerRequest {
   rawTranscript: string;
   questionCommittedAt?: number;
   speechLastActivityAt?: number;
+  speechEndedAt?: number;
   questionIntentReadyAt?: number;
   recentHistory?: ConversationItem[];
   profile?: CandidateProfile;

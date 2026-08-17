@@ -4,6 +4,7 @@ export type LatencyPipelineMode = "speculativeReused" | "speculativeReplaced" | 
 
 export interface PipelineTimestamps {
   speechLastActivityAt?: number;
+  speechEndedAt?: number;
   lastSttPartialAt?: number;
   lastSttFinalAt?: number;
   questionIntentReadyAt?: number;
@@ -12,6 +13,7 @@ export interface PipelineTimestamps {
   questionCommittedAt?: number;
   answerRequestStartedAt?: number;
   firstAnswerTokenAt?: number;
+  firstVisibleAnswerAt?: number;
   firstUsefulAnswerAt?: number;
   answerCompletedAt?: number;
   mode?: LatencyPipelineMode;
@@ -25,6 +27,8 @@ export interface PipelineLatencyMetrics {
   intentToSpeculativeRequest?: number;
   requestToFirstToken?: number;
   speechEndToFirstToken?: number;
+  prewarmLeadTimeMs?: number;
+  speechEndToFirstVisibleAnswerMs?: number;
   speechEndToFirstUsefulAnswer?: number;
   questionCommitAfterAnswerStarted?: number;
   totalAnswerGeneration?: number;
@@ -36,7 +40,7 @@ export interface PipelineLatencyMetrics {
 export function calculatePipelineMetrics(
   timestamps: PipelineTimestamps
 ): PipelineLatencyMetrics {
-  const speechEnd = timestamps.speechLastActivityAt ?? timestamps.lastSttFinalAt ?? timestamps.lastSttPartialAt;
+  const speechEnd = timestamps.speechEndedAt ?? timestamps.speechLastActivityAt ?? timestamps.lastSttFinalAt ?? timestamps.lastSttPartialAt;
   const intentReady = timestamps.questionIntentReadyAt ?? timestamps.intentCandidateAt;
   const committed = timestamps.questionCommittedAt;
   const requestStart = timestamps.speculativeRequestStartedAt ?? timestamps.answerRequestStartedAt;
@@ -56,10 +60,18 @@ export function calculatePipelineMetrics(
       intentReady !== undefined && timestamps.speculativeRequestStartedAt !== undefined
         ? Math.max(0, timestamps.speculativeRequestStartedAt - intentReady)
         : undefined,
+    prewarmLeadTimeMs:
+      speechEnd !== undefined && timestamps.speculativeRequestStartedAt !== undefined
+        ? Math.max(0, speechEnd - timestamps.speculativeRequestStartedAt)
+        : undefined,
     requestToFirstToken:
       requestStart !== undefined && firstToken !== undefined ? Math.max(0, firstToken - requestStart) : undefined,
     speechEndToFirstToken:
       speechEnd !== undefined && firstToken !== undefined ? Math.max(0, firstToken - speechEnd) : undefined,
+    speechEndToFirstVisibleAnswerMs:
+      speechEnd !== undefined && timestamps.firstVisibleAnswerAt !== undefined
+        ? Math.max(0, timestamps.firstVisibleAnswerAt - speechEnd)
+        : undefined,
     speechEndToFirstUsefulAnswer:
       speechEnd !== undefined && firstUseful !== undefined ? Math.max(0, firstUseful - speechEnd) : undefined,
     questionCommitAfterAnswerStarted:
@@ -87,11 +99,15 @@ export function formatPipelineMetricsLog(metrics: PipelineLatencyMetrics): strin
   } else {
     lines.push(`intentToRequest: ${fmt(metrics.intentToRequest)}`);
   }
+  if (metrics.prewarmLeadTimeMs !== undefined) {
+    lines.push(`prewarmLeadTimeMs: ${fmt(metrics.prewarmLeadTimeMs)}`);
+  }
   if (metrics.speechEndToCommit !== undefined) {
     lines.push(`speechEndToCommit: ${fmt(metrics.speechEndToCommit)}`);
   }
   lines.push(`requestToFirstToken: ${fmt(metrics.requestToFirstToken)}`);
   lines.push(`speechEndToFirstToken: ${fmt(metrics.speechEndToFirstToken)}`);
+  lines.push(`speechEndToFirstVisibleAnswerMs: ${fmt(metrics.speechEndToFirstVisibleAnswerMs)}`);
   lines.push(`speechEndToFirstUsefulAnswer: ${fmt(metrics.speechEndToFirstUsefulAnswer)}`);
   if (metrics.questionCommitAfterAnswerStarted !== undefined && metrics.mode?.startsWith("speculative")) {
     lines.push(`questionCommitAfterAnswerStarted: ${fmt(metrics.questionCommitAfterAnswerStarted)}`);

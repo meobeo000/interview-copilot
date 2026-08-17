@@ -39,7 +39,10 @@ function makeMockAnswerBridge() {
 // ---------------------------------------------------------------------------
 // Helper: build a full mock copilotWindow with stt + answer
 // ---------------------------------------------------------------------------
-function makeMockCopilotWindow(onPartial: (cb: (text: string) => void) => void) {
+function makeMockCopilotWindow(
+  onPartial: (cb: (text: string) => void) => void,
+  onSpeechFinal: (cb: (text?: string) => void) => void = () => {}
+) {
   return {
     hide: vi.fn(),
     getDesktopSourceId: vi.fn(),
@@ -53,6 +56,10 @@ function makeMockCopilotWindow(onPartial: (cb: (text: string) => void) => void) 
         return () => {};
       },
       onFinal: () => () => {},
+      onSpeechFinal: (cb: (text?: string) => void) => {
+        onSpeechFinal(cb);
+        return () => {};
+      },
       onError: () => () => {}
     },
     answer: makeMockAnswerBridge()
@@ -186,6 +193,68 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
     const history = useCopilotStore.getState().history;
     expect(history).toHaveLength(1);
     expect(history[0].rawTranscript).toContain("và tại sao em lại chọn cách đó");
+  });
+
+  it("commits immediately on provider speech_final and preserves accumulated intent evidence", () => {
+    let partialCb: ((text: string) => void) | undefined;
+    let speechFinalCb: ((text?: string) => void) | undefined;
+    window.copilotWindow = makeMockCopilotWindow(
+      (cb) => { partialCb = cb; },
+      (cb) => { speechFinalCb = cb; }
+    );
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /listen|bắt đầu/i }));
+
+    act(() => {
+      partialCb?.("20 triệu");
+      partialCb?.("20 triệu em phân bổ content");
+      partialCb?.("20 triệu em phân bổ content Entity Guest Post PBN");
+      speechFinalCb?.("20 triệu em phân bổ content Entity Guest Post PBN thế nào");
+    });
+
+    const state = useCopilotStore.getState();
+    expect(state.status).toBe("Answering");
+    expect(state.cleanedQuestion).toContain("20 triệu em phân bổ content Entity Guest Post PBN thế nào");
+    expect(state.detectedTopic).toBe("BUDGET_ALLOCATION");
+
+    act(() => {
+      vi.advanceTimersByTime(1_799);
+    });
+    expect(useCopilotStore.getState().cleanedQuestion).toContain("20 triệu em phân bổ");
+  });
+
+  it("does not commit chatter or double-commit speech_final followed by UtteranceEnd", async () => {
+    let partialCb: ((text: string) => void) | undefined;
+    let speechFinalCb: ((text?: string) => void) | undefined;
+    const mockWindow = makeMockCopilotWindow(
+      (cb) => { partialCb = cb; },
+      (cb) => { speechFinalCb = cb; }
+    );
+    window.copilotWindow = mockWindow;
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /listen|bắt đầu/i }));
+
+    act(() => {
+      partialCb?.("alo em nghe rõ không");
+      speechFinalCb?.("alo em nghe rõ không");
+      speechFinalCb?.("alo em nghe rõ không");
+    });
+    expect(useCopilotStore.getState().cleanedQuestion).toBe("");
+    expect(mockWindow.answer?.generateAnswer).not.toHaveBeenCalled();
+
+    act(() => {
+      partialCb?.("20 triệu phân bổ content Entity Guest Post PBN thế nào");
+      speechFinalCb?.("20 triệu phân bổ content Entity Guest Post PBN thế nào");
+      speechFinalCb?.("20 triệu phân bổ content Entity Guest Post PBN thế nào");
+    });
+    expect(mockWindow.answer?.generateAnswer).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(useCopilotStore.getState().history).toHaveLength(1);
   });
 
   it("bypasses Grace Window and finalizes immediately on Alt+Enter", async () => {

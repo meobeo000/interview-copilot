@@ -4,7 +4,7 @@ import { classifyQuestionIntent } from "../../question-detector/intentClassifier
 import { ContextAwareTranscriptCorrector } from "../../corrector/contextAwareCorrector";
 import { parseStreamingAnswer } from "../../llm/parseAnswerJson";
 import { VIETNAMESE_SEO_BENCHMARK_CASES } from "../../benchmark/vietnameseSeoBenchmark.data";
-import { useCopilotStore } from "./useCopilotStore";
+import { isSpeculativeSessionReusable, useCopilotStore } from "./useCopilotStore";
 import { SpeculativePrewarmPolicy } from "../../question-detector/speculativePrewarmPolicy";
 import { SemanticEvidenceAccumulator } from "../../question-detector/semanticEvidence";
 
@@ -86,6 +86,17 @@ describe("Phase 3: Speculative Gemini Prewarm & Lifecycle Tests", () => {
   });
 
   describe("Store Turn Lifecycle & Replay Tests", () => {
+    it("rejects speculative reuse when the turn ID is stale even if intent matches", () => {
+      const session = {
+        turnId: "turn-a",
+        status: "prewarming" as const,
+        intentCategory: "BUDGET_ALLOCATION" as const
+      };
+
+      expect(isSpeculativeSessionReusable(session, "turn-a", "BUDGET_ALLOCATION")).toBe(true);
+      expect(isSpeculativeSessionReusable(session, "turn-b", "BUDGET_ALLOCATION")).toBe(false);
+    });
+
     it("Test 30 & 32: Buffered output release on commit without premature display while speaking", () => {
       // Set store in listening state with active transcript
       useCopilotStore.setState({

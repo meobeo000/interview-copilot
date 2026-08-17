@@ -42,6 +42,7 @@ export class GeminiAnswerService implements AnswerService {
     const geminiRequestStartedAt = Date.now();
     const questionCommittedAt = request.questionCommittedAt ?? geminiRequestStartedAt;
     const speechLastActivityAt = request.speechLastActivityAt ?? questionCommittedAt;
+    const speechEndedAt = request.speechEndedAt ?? speechLastActivityAt;
     const questionIntentReadyAt = request.questionIntentReadyAt ?? questionCommittedAt;
 
     let firstAnswerTokenAt: number | undefined;
@@ -237,6 +238,7 @@ export class GeminiAnswerService implements AnswerService {
 
     const metrics = calculatePipelineMetrics({
       speechLastActivityAt,
+      speechEndedAt,
       questionIntentReadyAt,
       questionCommittedAt,
       answerRequestStartedAt: geminiRequestStartedAt,
