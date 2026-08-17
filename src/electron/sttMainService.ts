@@ -59,6 +59,12 @@ export class SttMainService {
           }
           window.webContents.send("stt:final", text);
         },
+        onSpeechFinal: (text) => {
+          if (!this.active) {
+            return;
+          }
+          window.webContents.send("stt:speech-final", text);
+        },
         onError: (error) => {
           if (this.active) {
             window.webContents.send("stt:error", error.message);

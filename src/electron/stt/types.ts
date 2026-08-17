@@ -16,6 +16,7 @@ export interface SttConfig {
 export interface SttProviderCallbacks {
   onPartial: (text: string) => void;
   onFinal: (text: string) => void;
+  onSpeechFinal?: (text?: string) => void;
   onError: (error: Error) => void;
 }
 

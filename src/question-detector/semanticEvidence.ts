@@ -339,12 +339,7 @@ export class SemanticEvidenceAccumulator {
     if (isIncremental) {
       this.state.latestTranscript = `${this.state.latestTranscript} ${trimmed}`.trim();
     } else {
-      // If snapshot is shorter than current transcript (e.g. out of order partial), preserve accumulated text
-      if (this.state.latestTranscript && !trimmed.startsWith(this.state.latestTranscript) && !this.state.latestTranscript.startsWith(trimmed)) {
-        this.state.latestTranscript = `${this.state.latestTranscript} ${trimmed}`.trim();
-      } else {
-        this.state.latestTranscript = trimmed;
-      }
+      this.state.latestTranscript = trimmed;
     }
 
     this.mergeEvidenceFromText(trimmed);

@@ -244,6 +244,32 @@ export class SmartQuestionDetector implements QuestionDetector {
     }, hardTimeout);
   }
 
+  /**
+   * Immediately evaluates question finalization when a provider speech_final / endpoint signal arrives.
+   */
+  triggerSpeechFinal(
+    fullText: string,
+    onFinalizeCandidate: (candidate: QuestionCandidate) => void
+  ): void {
+    const trimmed = fullText.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    this.clearTimers();
+    const intent = this.detectIntent(trimmed);
+
+    // If text has meaningful question intent (not UNKNOWN) and has adequate length / question structure
+    if (intent.category !== "UNKNOWN" && (hasQuestionIntent(trimmed) || trimmed.split(/\s+/).length >= 4)) {
+      onFinalizeCandidate({
+        text: trimmed,
+        isComplete: true,
+        reason: "Provider speech_final endpoint reached.",
+        intent
+      });
+    }
+  }
+
   clearTimers(): void {
     if (this.candidateTimer !== undefined) {
       window.clearTimeout(this.candidateTimer);

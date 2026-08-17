@@ -24,6 +24,11 @@ contextBridge.exposeInMainWorld("copilotWindow", {
       ipcRenderer.on("stt:final", listener);
       return () => ipcRenderer.removeListener("stt:final", listener);
     },
+    onSpeechFinal: (callback: (text?: string) => void) => {
+      const listener = (_event: unknown, text?: string) => callback(text);
+      ipcRenderer.on("stt:speech-final", listener);
+      return () => ipcRenderer.removeListener("stt:speech-final", listener);
+    },
     onError: (callback: (error: string) => void) => {
       const listener = (_event: unknown, error: string) => callback(error);
       ipcRenderer.on("stt:error", listener);

@@ -107,11 +107,22 @@ export class DeepgramStreamingSttProvider implements StreamingSttProvider {
 
         try {
           const response = JSON.parse(data.toString()) as {
+            type?: string;
             is_final?: boolean;
+            speech_final?: boolean;
             channel?: { alternatives?: Array<{ transcript?: string }> };
           };
+
+          if (response.type === "UtteranceEnd") {
+            this.callbacks?.onSpeechFinal?.();
+            return;
+          }
+
           const transcript = response.channel?.alternatives?.[0]?.transcript?.trim();
           if (!transcript) {
+            if (response.speech_final) {
+              this.callbacks?.onSpeechFinal?.();
+            }
             return;
           }
 
@@ -119,6 +130,10 @@ export class DeepgramStreamingSttProvider implements StreamingSttProvider {
             this.callbacks?.onFinal(transcript);
           } else {
             this.callbacks?.onPartial(transcript);
+          }
+
+          if (response.speech_final) {
+            this.callbacks?.onSpeechFinal?.(transcript);
           }
         } catch {
           // Ignore non-JSON provider frames.

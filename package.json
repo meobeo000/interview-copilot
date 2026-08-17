@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "diagnostic:gemini": "npx tsx src/diagnostics/geminiDiagnostic.ts",
     "diagnostic:speculative": "npx tsx src/diagnostics/speculativeDiagnostic.ts",
+    "diagnostic:turn-assembly": "npx tsx src/diagnostics/turnAssemblyDiagnostic.ts",
     "test": "vitest run",
     "build": "tsc -p tsconfig.node.json && vite build"
   },

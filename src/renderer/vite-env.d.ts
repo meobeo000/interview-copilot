@@ -13,6 +13,7 @@ interface Window {
       getConfig: () => Promise<{ provider: string; isRealSttAvailable: boolean; mockMode: boolean }>;
       onPartial: (callback: (text: string) => void) => () => void;
       onFinal: (callback: (text: string) => void) => () => void;
+      onSpeechFinal?: (callback: (text?: string) => void) => () => void;
       onError: (callback: (error: string) => void) => () => void;
     };
     answer?: {

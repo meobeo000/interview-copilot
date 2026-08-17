@@ -865,6 +865,17 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
         turnSpeechLastActivityAt = turnLastSttFinalAt;
         handleTranscriptUpdate(chunk.text, set, get);
       },
+      onSpeechFinal: (chunk) => {
+        turnLastSttFinalAt = Date.now();
+        turnSpeechLastActivityAt = turnLastSttFinalAt;
+        handleTranscriptUpdate(chunk.text, set, get);
+        smartDetector.triggerSpeechFinal(chunk.text, (candidate) => {
+          if (candidate.intent) {
+            latestIntentCandidate = candidate.intent;
+          }
+          startGraceWindow(candidate.text, set, get);
+        });
+      },
       onError: (error) => {
         void audioCapture.stop();
         set({ status: "Error", audioLevel: 0, error: error.message });

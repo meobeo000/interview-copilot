@@ -1,17 +1,16 @@
 import type { AudioFrame } from "../audio/types";
 import type { StreamController, TranscriptCallbacks, TranscriptChunk } from "../shared/types";
 import type { TranscriptionService } from "./types";
+import { TurnTranscriptAssembler } from "./turnTranscriptAssembler";
 
 export class RealStreamingSTTService implements TranscriptionService {
   private active = false;
-  private currentPartial = "";
-  private accumulatedFinal = "";
+  private readonly assembler = new TurnTranscriptAssembler();
   private startedAt = Date.now();
 
   start(callbacks: TranscriptCallbacks): StreamController {
     this.active = true;
-    this.currentPartial = "";
-    this.accumulatedFinal = "";
+    this.assembler.reset();
     this.startedAt = Date.now();
 
     const stt = window.copilotWindow?.stt;
@@ -25,10 +24,9 @@ export class RealStreamingSTTService implements TranscriptionService {
       if (!this.active) {
         return;
       }
-      this.currentPartial = partialText;
-      const combinedText = (this.accumulatedFinal + " " + partialText).trim();
+      const text = this.assembler.applyPartial(partialText);
       const chunk: TranscriptChunk = {
-        text: combinedText,
+        text,
         isFinal: false,
         startedAt: this.startedAt
       };
@@ -39,16 +37,40 @@ export class RealStreamingSTTService implements TranscriptionService {
       if (!this.active) {
         return;
       }
-      this.accumulatedFinal = (this.accumulatedFinal + " " + finalText).trim();
-      this.currentPartial = "";
+      const text = this.assembler.applyFinal(finalText);
       const chunk: TranscriptChunk = {
-        text: this.accumulatedFinal,
+        text,
         isFinal: true,
         startedAt: this.startedAt,
         completedAt: Date.now()
       };
       callbacks.onFinal(chunk);
     });
+
+    const unsubSpeechFinal = stt.onSpeechFinal
+      ? stt.onSpeechFinal((speechFinalText) => {
+          if (!this.active) {
+            return;
+          }
+          if (speechFinalText) {
+            this.assembler.applyFinal(speechFinalText);
+          } else {
+            this.assembler.applySpeechFinal();
+          }
+          const text = this.assembler.getDisplayTranscript();
+          const chunk: TranscriptChunk = {
+            text,
+            isFinal: true,
+            startedAt: this.startedAt,
+            completedAt: Date.now()
+          };
+          if (callbacks.onSpeechFinal) {
+            callbacks.onSpeechFinal(chunk);
+          } else {
+            callbacks.onFinal(chunk);
+          }
+        })
+      : () => {};
 
     const unsubError = stt.onError((errorMessage) => {
       if (!this.active) {
@@ -68,6 +90,7 @@ export class RealStreamingSTTService implements TranscriptionService {
         this.active = false;
         unsubPartial();
         unsubFinal();
+        unsubSpeechFinal();
         unsubError();
         void stt.stopSession();
       }
@@ -75,8 +98,7 @@ export class RealStreamingSTTService implements TranscriptionService {
   }
 
   resetTurn(): void {
-    this.accumulatedFinal = "";
-    this.currentPartial = "";
+    this.assembler.reset();
     this.startedAt = Date.now();
   }
 

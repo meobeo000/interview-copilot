@@ -55,6 +55,7 @@ export interface TranscriptChunk {
 export interface TranscriptCallbacks {
   onPartial: (chunk: TranscriptChunk) => void;
   onFinal: (chunk: TranscriptChunk) => void;
+  onSpeechFinal?: (chunk: TranscriptChunk) => void;
   onError: (error: Error) => void;
   onComplete: () => void;
 }
