@@ -1,3 +1,5 @@
+import type { SemanticEvidenceState } from "./semanticEvidence";
+
 export type QuestionIntentCategory =
   | "PROJECT_EXPERIENCE"
   | "BUDGET_ALLOCATION"
@@ -29,7 +31,7 @@ export interface QuestionIntent {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-Signal Evidence Extractors (Robust to imperfect Vietnamese STT)
+// Multi-Signal Evidence Extractors (Semantic Domain Evidence - No Brittle Phonetic Hacks)
 // ---------------------------------------------------------------------------
 
 interface SignalExtractionResult {
@@ -38,20 +40,20 @@ interface SignalExtractionResult {
   breakdown: Record<string, number>;
 }
 
-function extractMoneySignals(text: string): SignalExtractionResult {
+function extractMoneySignals(text: string, state?: SemanticEvidenceState): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
-  // Monetary keywords (including phonetics like bết, béc, bắt dét)
-  const moneyKeywordMatches = text.match(/\b(ngân sách|chi phí|chi tiêu|tiền|budget|bết|béc|bắt dét|bớt dét)\b/gi);
+  // Safe lexical terms (Domain terms only - NO phonetic hacks like bết/béc/bắt dét)
+  const moneyKeywordMatches = text.match(/\b(ngân sách|chi phí|chi tiêu|tiền|budget)\b/gi);
   if (moneyKeywordMatches) {
     const count = moneyKeywordMatches.length;
     breakdown.moneyLexical = count * 3;
     tokens.push(...moneyKeywordMatches);
   }
 
-  // Vietnamese numerical amounts (numeric or spoken words with currency/multiplier)
-  const amountPattern = /\b(\d+|hai mươi|ba mươi|bốn mươi|năm mươi|sáu mươi|bảy mươi|tám mươi|chín mươi|mười|trăm|\d+k|\d+m)\s*(triệu|tr|củ|nghìn|k|vnd|vnđ|usd|\$)\b/gi;
+  // Numerical currency amounts (numeric or spoken Vietnamese numbers with currency/multiplier)
+  const amountPattern = /\b(\d+(?:\.\d+)?|hai mươi|ba mươi|bốn mươi|năm mươi|sáu mươi|bảy mươi|tám mươi|chín mươi|mười|trăm|\d+k|\d+m)\s*(triệu|tr|củ|nghìn|k|vnd|vnđ|usd|\$)\b/gi;
   const amountMatches = text.match(amountPattern);
   if (amountMatches) {
     breakdown.numericAmount = 5;
@@ -65,11 +67,17 @@ function extractMoneySignals(text: string): SignalExtractionResult {
     }
   }
 
+  // Accumulate from state if prior partial had money but current partial text doesn't
+  if (!breakdown.numericAmount && !breakdown.moneyLexical && state && state.moneyAmounts.length > 0) {
+    breakdown.accumulatedMoney = 5;
+    tokens.push(...state.moneyAmounts);
+  }
+
   const score = Object.values(breakdown).reduce((a, b) => a + b, 0);
-  return { score, tokens, breakdown };
+  return { score, tokens: Array.from(new Set(tokens)), breakdown };
 }
 
-function extractAllocationSignals(text: string): SignalExtractionResult {
+function extractAllocationSignals(text: string, state?: SemanticEvidenceState): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
@@ -81,16 +89,21 @@ function extractAllocationSignals(text: string): SignalExtractionResult {
 
   // Question words inquiring about how to divide
   const howToDivide = text.match(/\b(thế nào|ra sao|như thế nào|sao)\b/gi);
-  if (howToDivide && (text.includes("chia") || text.includes("phân bổ") || text.includes("dành"))) {
+  if (howToDivide && (text.includes("chia") || text.includes("phân bổ") || text.includes("dành") || (state && state.allocationSignals.length > 0))) {
     breakdown.allocationQuestion = 2;
     tokens.push(howToDivide[0]);
   }
 
+  if (!breakdown.allocationAction && state && state.allocationSignals.length > 0) {
+    breakdown.accumulatedAllocation = 4;
+    tokens.push(...state.allocationSignals);
+  }
+
   const score = Object.values(breakdown).reduce((a, b) => a + b, 0);
-  return { score, tokens, breakdown };
+  return { score, tokens: Array.from(new Set(tokens)), breakdown };
 }
 
-function extractSeoCategorySignals(text: string): SignalExtractionResult {
+function extractSeoCategorySignals(text: string, state?: SemanticEvidenceState): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
@@ -110,6 +123,9 @@ function extractSeoCategorySignals(text: string): SignalExtractionResult {
     if (match) {
       detectedCategories++;
       tokens.push(match[0]);
+    } else if (state && state.seoEntities.some((e) => e.toLowerCase() === cat.name || (cat.name === "entity" && e === "Entity") || (cat.name === "guest_post" && e === "Guest Post") || (cat.name === "pbn" && e === "PBN"))) {
+      detectedCategories++;
+      tokens.push(cat.name);
     }
   }
 
@@ -118,24 +134,27 @@ function extractSeoCategorySignals(text: string): SignalExtractionResult {
   }
 
   const score = Object.values(breakdown).reduce((a, b) => a + b, 0);
-  return { score, tokens, breakdown };
+  return { score, tokens: Array.from(new Set(tokens)), breakdown };
 }
 
-function extractDomainComparisonSignals(text: string): SignalExtractionResult {
+function extractDomainComparisonSignals(text: string, state?: SemanticEvidenceState): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
   // Strictly require domain evaluation context (not general anchor link context)
-  const hasDomainContext = text.match(/\b(expired domain|tên miền|con a|con b|site a|site b|domain a|domain b|tld|\.in|\.me|\.my|\.nl|\.co\.in|có mua không|có lấy không|chọn con nào|lấy không|dr cao|organic traffic|traffic = 0|traffic bằng 0|traffic không|traffic thật|wayback|a href|ah ref|ai rép|ahrefs|đối thủ)\b/i)
-    || (text.match(/\bdomain\b/i) && !text.match(/\breferring domain\b/i));
+  const hasDomainContext =
+    text.match(/\b(expired domain|tên miền|con a|con b|site a|site b|domain a|domain b|tld|\.in|\.me|\.my|\.nl|\.co\.in|có mua không|có lấy không|chọn con nào|lấy không|dr cao|organic traffic|traffic = 0|traffic bằng 0|traffic không|traffic thật|wayback|a href|ah ref|ai rép|ahrefs|đối thủ)\b/i) ||
+    (text.match(/\bdomain\b/i) && !text.match(/\breferring domain\b/i)) ||
+    (state && (state.drValues.length > 0 || state.comparisonSignals.length > 0));
 
   if (!hasDomainContext) {
     return { score: 0, tokens: [], breakdown: {} };
   }
 
   // Domain identifiers
-  const domainMatches = text.match(/\b(expired domain|tên miền|con domain|tld|\.in|\.me|\.my|\.nl|\.co\.in)\b/gi)
-    || (text.match(/\bdomain\b/i) && !text.match(/\breferring domain\b/i) ? ["domain"] : null);
+  const domainMatches =
+    text.match(/\b(expired domain|tên miền|con domain|tld|\.in|\.me|\.my|\.nl|\.co\.in)\b/gi) ||
+    (text.match(/\bdomain\b/i) && !text.match(/\breferring domain\b/i) ? ["domain"] : null);
   if (domainMatches) {
     breakdown.domainLexical = 4;
     tokens.push(...domainMatches);
@@ -146,6 +165,9 @@ function extractDomainComparisonSignals(text: string): SignalExtractionResult {
   if (comparisonMatches) {
     breakdown.domainEntities = 6;
     tokens.push(...comparisonMatches);
+  } else if (state && state.comparisonSignals.length > 0) {
+    breakdown.domainEntities = 6;
+    tokens.push(...state.comparisonSignals);
   }
 
   // Domain metrics & tools (DR, UR, organic traffic, Wayback, ahrefs competitor domain check)
@@ -153,6 +175,9 @@ function extractDomainComparisonSignals(text: string): SignalExtractionResult {
   if (metricMatches) {
     breakdown.metrics = metricMatches.length * 3;
     tokens.push(...metricMatches);
+  } else if (state && state.drValues.length > 0) {
+    breakdown.metrics = state.drValues.length * 3;
+    tokens.push(...state.drValues.map((d) => `DR ${d}`));
   }
 
   // Domain decision language
@@ -163,10 +188,10 @@ function extractDomainComparisonSignals(text: string): SignalExtractionResult {
   }
 
   const score = Object.values(breakdown).reduce((a, b) => a + b, 0);
-  return { score, tokens, breakdown };
+  return { score, tokens: Array.from(new Set(tokens)), breakdown };
 }
 
-function extractIndexingSignals(text: string): SignalExtractionResult {
+function extractIndexingSignals(text: string, state?: SemanticEvidenceState): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
@@ -192,18 +217,26 @@ function extractIndexingSignals(text: string): SignalExtractionResult {
   if (durationMatches) {
     breakdown.duration = 3;
     tokens.push(...durationMatches);
+  } else if (!breakdown.duration && state && state.durations.length > 0) {
+    breakdown.duration = 3;
+    tokens.push(...state.durations);
   }
 
   // Require noKeywordEvidence or botActivity
-  if (!breakdown.noKeywordEvidence && !breakdown.botActivity) {
+  if (!breakdown.noKeywordEvidence && !breakdown.botActivity && !(state && state.indexingSignals.length > 0)) {
     return { score: 0, tokens: [], breakdown: {} };
   }
 
+  if (state && state.indexingSignals.length > 0 && !breakdown.noKeywordEvidence) {
+    breakdown.accumulatedIndexing = 5;
+    tokens.push(...state.indexingSignals);
+  }
+
   const score = Object.values(breakdown).reduce((a, b) => a + b, 0);
-  return { score, tokens, breakdown };
+  return { score, tokens: Array.from(new Set(tokens)), breakdown };
 }
 
-function extractPbnTimingSignals(text: string): SignalExtractionResult {
+function extractPbnTimingSignals(text: string, state?: SemanticEvidenceState): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
@@ -216,19 +249,21 @@ function extractPbnTimingSignals(text: string): SignalExtractionResult {
     return { score: 0, tokens: [], breakdown: {} };
   }
 
-  // BOTH PBN mention AND timing inquiry are strictly required for PBN_TIMING!
-  if (!pbnMatches || !timingMatches) {
+  const hasPbn = pbnMatches || (state && state.seoEntities.includes("PBN"));
+  const hasTiming = timingMatches || (state && state.actionSignals.some((a) => a.includes("đi") || a.includes("bắn")));
+
+  if (!hasPbn || !hasTiming) {
     return { score: 0, tokens: [], breakdown: {} };
   }
 
   breakdown.pbnTarget = 4;
-  tokens.push(...pbnMatches);
+  if (pbnMatches) tokens.push(...pbnMatches);
 
   breakdown.timingInquiry = 6;
-  tokens.push(...timingMatches);
+  if (timingMatches) tokens.push(...timingMatches);
 
   const score = Object.values(breakdown).reduce((a, b) => a + b, 0);
-  return { score, tokens, breakdown };
+  return { score, tokens: Array.from(new Set(tokens)), breakdown };
 }
 
 function extractCoreUpdateSignals(text: string): SignalExtractionResult {
@@ -253,7 +288,7 @@ function extractCoreUpdateSignals(text: string): SignalExtractionResult {
   return { score, tokens, breakdown };
 }
 
-function extractGscDropSignals(text: string): SignalExtractionResult {
+function extractGscDropSignals(text: string, state?: SemanticEvidenceState): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
@@ -261,6 +296,9 @@ function extractGscDropSignals(text: string): SignalExtractionResult {
   if (gscMatches) {
     breakdown.gscTool = 5;
     tokens.push(...gscMatches);
+  } else if (state && state.seoEntities.includes("GSC")) {
+    breakdown.gscTool = 5;
+    tokens.push("GSC");
   }
 
   const metricDropMatches = text.match(/\b(impression|click|thứ hạng|ranking|ctr|average position|vị trí)\b.+\b(tụt|giảm|drop|mất|rớt)\b/gi);
@@ -268,6 +306,9 @@ function extractGscDropSignals(text: string): SignalExtractionResult {
     breakdown.metricDrop = 6;
     tokens.push(...metricDropMatches);
   } else if (text.match(/\b(tụt|giảm|drop|mất|rớt)\b.+\b(impression|click|traffic|ranking)\b/gi)) {
+    breakdown.metricDrop = 6;
+    tokens.push("tụt metric");
+  } else if (state && (state.percentages.length > 0 || state.positions.length > 0) && (state.rankingSignals.some((r) => r.includes("giảm") || r.includes("tụt")))) {
     breakdown.metricDrop = 6;
     tokens.push("tụt metric");
   }
@@ -384,14 +425,17 @@ function extractProjectExperienceSignals(text: string): SignalExtractionResult {
   return { score, tokens, breakdown };
 }
 
-function extractStrategyPlanSignals(text: string): SignalExtractionResult {
+function extractStrategyPlanSignals(text: string, state?: SemanticEvidenceState): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
-  const strategyMatches = text.match(/\b(internal link|internal links|money page|anchor text|an co text|an co teck|cấu trúc silo|topic cluster|kế hoạch|chiến lược|tiêu chí chọn site|outreach|en ti ti|entity|gét pót|guest post|content)\b/gi);
+  const strategyMatches = text.match(/\b(internal link|internal links|money page|anchor text|an co text|an co teck|cấu trúc silo|topic cluster|kế hoạch|chiến lược|tiêu chí chọn site|outreach|en ti ti|entity|gét pót|guest post|referring domain|content)\b/gi);
   if (strategyMatches) {
     breakdown.strategyConcepts = strategyMatches.length * 4;
     tokens.push(...strategyMatches);
+  } else if (state && state.seoEntities.length > 0) {
+    breakdown.strategyConcepts = state.seoEntities.length * 3;
+    tokens.push(...state.seoEntities);
   }
 
   const actionMatches = text.match(/\b(đi link|xây dựng link|triển khai link|tối ưu internal link|đẩy link|build en ti ti|build entity|chọn site đi|triển khai|triển khai thế nào)\b/gi);
@@ -412,15 +456,15 @@ function extractStrategyPlanSignals(text: string): SignalExtractionResult {
 // Weighted Intent Scoring Engine
 // ---------------------------------------------------------------------------
 
-export function calculateIntentScores(text: string): IntentSignalScore[] {
+export function calculateIntentScores(text: string, state?: SemanticEvidenceState): IntentSignalScore[] {
   const lower = text.toLowerCase();
   const scores: IntentSignalScore[] = [];
 
   // 1. BUDGET_ALLOCATION
   // STRICT RULE: Requires monetary amount or explicit budget/ngân sách keyword
-  const moneySig = extractMoneySignals(lower);
-  const allocSig = extractAllocationSignals(lower);
-  const seoCatSig = extractSeoCategorySignals(lower);
+  const moneySig = extractMoneySignals(lower, state);
+  const allocSig = extractAllocationSignals(lower, state);
+  const seoCatSig = extractSeoCategorySignals(lower, state);
 
   let budgetTotal = 0;
   const budgetBreakdown: Record<string, number> = {};
@@ -462,7 +506,7 @@ export function calculateIntentScores(text: string): IntentSignalScore[] {
   });
 
   // 2. DOMAIN_SELECTION
-  const domainSig = extractDomainComparisonSignals(lower);
+  const domainSig = extractDomainComparisonSignals(lower, state);
   scores.push({
     category: "DOMAIN_SELECTION",
     totalScore: domainSig.score,
@@ -471,7 +515,7 @@ export function calculateIntentScores(text: string): IntentSignalScore[] {
   });
 
   // 3. NO_KEYWORD_SIGNAL
-  const indexSig = extractIndexingSignals(lower);
+  const indexSig = extractIndexingSignals(lower, state);
   let noKeyTotal = indexSig.score;
   if (indexSig.breakdown.botActivity && indexSig.breakdown.noKeywordEvidence) {
     noKeyTotal += 5;
@@ -485,7 +529,7 @@ export function calculateIntentScores(text: string): IntentSignalScore[] {
   });
 
   // 4. PBN_TIMING
-  const pbnTimingSig = extractPbnTimingSignals(lower);
+  const pbnTimingSig = extractPbnTimingSignals(lower, state);
   let pbnTimingTotal = pbnTimingSig.score;
   if (pbnTimingSig.breakdown.pbnTarget && pbnTimingSig.breakdown.timingInquiry) {
     pbnTimingTotal += 5;
@@ -508,7 +552,7 @@ export function calculateIntentScores(text: string): IntentSignalScore[] {
   });
 
   // 6. GSC_RANKING_DROP
-  const gscSig = extractGscDropSignals(lower);
+  const gscSig = extractGscDropSignals(lower, state);
   scores.push({
     category: "GSC_RANKING_DROP",
     totalScore: gscSig.score,
@@ -553,7 +597,7 @@ export function calculateIntentScores(text: string): IntentSignalScore[] {
   });
 
   // 11. STRATEGY_PLAN (Fallback / Generic tactical intent)
-  const stratSig = extractStrategyPlanSignals(lower);
+  const stratSig = extractStrategyPlanSignals(lower, state);
   scores.push({
     category: "STRATEGY_PLAN",
     totalScore: stratSig.score,
@@ -593,13 +637,24 @@ function logIntentDiagnostic(question: string, scores: IntentSignalScore[], sele
 /**
  * Robust Multi-Signal Semantic Intent Classifier.
  * Understands interviewer questions from multi-signal evidence even when STT transcription is noisy.
+ * Supports classification from either raw text or accumulated SemanticEvidenceState.
  */
 export function classifyQuestionIntent(
-  semanticInput: string,
-  rawTranscript?: string
+  semanticInput: string | SemanticEvidenceState,
+  rawTranscript?: string,
+  accumulatedState?: SemanticEvidenceState
 ): QuestionIntent {
-  const text = (semanticInput || rawTranscript || "").trim();
-  if (!text) {
+  let text = "";
+  let state = accumulatedState;
+
+  if (typeof semanticInput === "object" && semanticInput !== null) {
+    state = semanticInput;
+    text = (state.latestTranscript || rawTranscript || "").trim();
+  } else {
+    text = (semanticInput || rawTranscript || "").trim();
+  }
+
+  if (!text && (!state || state.rawPartials.length === 0)) {
     return {
       category: "UNKNOWN",
       confidence: 0,
@@ -609,7 +664,7 @@ export function classifyQuestionIntent(
     };
   }
 
-  const scores = calculateIntentScores(text);
+  const scores = calculateIntentScores(text, state);
   let topCandidate = scores[0];
 
   // Specific intents beat generic STRATEGY_PLAN when their specific evidence is present
@@ -632,7 +687,8 @@ export function classifyQuestionIntent(
     } else if (topCandidate.totalScore >= 8) {
       confidence = 0.93;
     } else if (topCandidate.totalScore >= 5) {
-      confidence = 0.90;
+      // Single isolated signal without multi-signal composite
+      confidence = topCandidate.signals.compositeMultiSignal ? 0.90 : 0.75;
     }
 
     logIntentDiagnostic(text, scores, topCandidate.category, confidence);
@@ -649,7 +705,7 @@ export function classifyQuestionIntent(
 
   // Moderate score fallback (score >= 3)
   if (topCandidate && topCandidate.totalScore >= 3) {
-    const confidence = 0.75;
+    const confidence = 0.70;
     logIntentDiagnostic(text, scores, topCandidate.category, confidence);
     return {
       category: topCandidate.category,

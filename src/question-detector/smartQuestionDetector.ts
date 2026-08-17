@@ -1,5 +1,6 @@
 import type { QuestionDetectionResult } from "../shared/types";
 import { classifyQuestionIntent, type QuestionIntent } from "./intentClassifier";
+import { SemanticEvidenceAccumulator, type SemanticEvidenceState } from "./semanticEvidence";
 import type { QuestionDetector } from "./types";
 
 export interface QuestionCandidate {
@@ -133,15 +134,27 @@ export function isVietnameseSentenceComplete(text: string): boolean {
 export class SmartQuestionDetector implements QuestionDetector {
   private candidateTimer: number | undefined;
   private hardTimeoutTimer: number | undefined;
+  private accumulator: SemanticEvidenceAccumulator;
 
   public CANDIDATE_PAUSE_MS = 1200;
   public HARD_TIMEOUT_MS = 2800;
 
+  constructor() {
+    this.accumulator = new SemanticEvidenceAccumulator();
+  }
+
   /**
-   * Evaluates semantic intent for the given transcript text.
+   * Returns current accumulated semantic evidence state for this turn.
+   */
+  getEvidenceState(): SemanticEvidenceState {
+    return this.accumulator.getState();
+  }
+
+  /**
+   * Evaluates semantic intent for the given transcript text and accumulated evidence.
    */
   detectIntent(text: string, rawTranscript?: string): QuestionIntent {
-    return classifyQuestionIntent(text, rawTranscript);
+    return classifyQuestionIntent(text, rawTranscript, this.accumulator.getState());
   }
 
   async analyze(rawTranscript: string): Promise<QuestionDetectionResult> {
@@ -170,6 +183,9 @@ export class SmartQuestionDetector implements QuestionDetector {
     if (!trimmed) {
       return;
     }
+
+    // Accumulate semantic evidence progressively across STT partials
+    this.accumulator.appendPartial(trimmed);
 
     // Reset timers when new speech arrives
     this.clearTimers();
@@ -241,5 +257,6 @@ export class SmartQuestionDetector implements QuestionDetector {
 
   reset(): void {
     this.clearTimers();
+    this.accumulator.reset();
   }
 }

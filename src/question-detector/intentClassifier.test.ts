@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { calculateIntentScores, classifyQuestionIntent } from "./intentClassifier";
 
-describe("Question Intent Classifier (Phase 1: Robust Multi-Signal Intent Scoring)", () => {
+describe("Question Intent Classifier (Phase 1 Cleanup & Robust Multi-Signal Intent Scoring)", () => {
   describe("Core Intent Categories", () => {
     it("classifies PROJECT_EXPERIENCE questions correctly", () => {
       const res = classifyQuestionIntent("Dự án iGaming gần nhất em làm là con nào?");
@@ -67,9 +67,9 @@ describe("Question Intent Classifier (Phase 1: Robust Multi-Signal Intent Scorin
     });
   });
 
-  describe("Phase 1 Multi-Signal Scoring on Corrupted / Noisy Vietnamese STT", () => {
-    it("classifies corrupted 'budget' (bết) with money + allocation + categories as BUDGET_ALLOCATION", () => {
-      const transcript = "bết ban đầu hai mươi triệu em phân bổ content entity backlink guest post pbn thế nào";
+  describe("Phase 1 Multi-Signal Scoring without Hardcoded Phonetic Variants", () => {
+    it("classifies 'xyz ban đầu hai mươi triệu em phân bổ content entity backlink guest post pbn thế nào' as BUDGET_ALLOCATION via money + allocation + categories", () => {
+      const transcript = "xyz ban đầu hai mươi triệu em phân bổ content entity backlink guest post pbn thế nào";
       const res = classifyQuestionIntent(transcript);
 
       expect(res.category).toBe("BUDGET_ALLOCATION");
@@ -85,8 +85,8 @@ describe("Question Intent Classifier (Phase 1: Robust Multi-Signal Intent Scorin
       expect(res.confidence).toBeGreaterThanOrEqual(0.85);
     });
 
-    it("classifies 'ngân sách 30 triệu dành bao nhiêu cho guest post' as BUDGET_ALLOCATION", () => {
-      const transcript = "ngân sách 30 triệu dành bao nhiêu cho guest post";
+    it("classifies 'xyz 30 triệu dành bao nhiêu cho guest post' as BUDGET_ALLOCATION", () => {
+      const transcript = "xyz 30 triệu dành bao nhiêu cho guest post";
       const res = classifyQuestionIntent(transcript);
 
       expect(res.category).toBe("BUDGET_ALLOCATION");
@@ -128,7 +128,7 @@ describe("Question Intent Classifier (Phase 1: Robust Multi-Signal Intent Scorin
 
   describe("Multi-Signal Scoring Diagnostics Breakdown", () => {
     it("produces structured score breakdowns for inspection", () => {
-      const scores = calculateIntentScores("bết ban đầu hai mươi triệu em phân bổ content entity backlink guest post pbn thế nào");
+      const scores = calculateIntentScores("ban đầu hai mươi triệu em phân bổ content entity backlink guest post pbn thế nào");
       expect(scores.length).toBeGreaterThan(0);
 
       const budgetScore = scores.find((s) => s.category === "BUDGET_ALLOCATION");
