@@ -31,6 +31,8 @@ export interface GroundedContractFact {
   confidence: number;
 }
 
+import type { ScenarioConstraints } from "../question-detector/scenarioConstraints";
+
 export interface AnswerContract {
   intent: QuestionIntentCategory;
   answerType: AnswerContractType;
@@ -44,6 +46,7 @@ export interface AnswerContract {
   candidateExperienceAllowed: boolean; // Preserved for backward compatibility
   groundedFacts: GroundedContractFact[];
   allocationGrounding?: AllocationGrounding;
+  scenarioConstraints?: ScenarioConstraints;
   contractBuildMs: number;
 }
 
@@ -618,10 +621,11 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
       maxWords = 100;
       break;
 
+    case "CORE_UPDATE_RECOVERY":
     case "GSC_RANKING_DROP":
     case "ONPAGE_DIAGNOSIS":
       answerType = "DIRECT_ACTION_DIAGNOSIS";
-      firstSentenceDirective = "Sentence 1 MUST state the first technical checkpoint in GSC/Ahrefs.";
+      firstSentenceDirective = "Sentence 1 MUST state the first technical checkpoint in GSC/Ahrefs or immediate 24h diagnosis.";
       preferredStructure = "Sentence 1: First check. Sentence 2-3: Technical diagnostic steps. Sentence 4: Remediation plan.";
       maxWords = 110;
       break;
@@ -649,6 +653,8 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
     forbiddenBehaviors.push("In PROPOSED mode, do NOT present proposed numbers as known historical facts or candidate personal history. Sentence 1 MUST use proposal/approximation wording.");
   }
 
+  const scenarioConstraints = options.semanticEvidence?.scenarioConstraints;
+
   const contractBuildMs = Math.round((performance.now() - start) * 100) / 100;
 
   return {
@@ -664,6 +670,7 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
     candidateExperienceAllowed: candidateExperience.allowed,
     groundedFacts,
     allocationGrounding,
+    scenarioConstraints,
     contractBuildMs
   };
 }
@@ -754,6 +761,26 @@ export function formatContractForPrompt(contract: AnswerContract): string {
     lines.push(`- Required SEO Entities to Cover: ${contract.requiredEntities.join(", ")}`);
   }
 
+  if (contract.scenarioConstraints) {
+    const ruledOut: string[] = [];
+    const sc = contract.scenarioConstraints;
+    if (sc.indexingIssue === false) ruledOut.push("indexingIssue = false (indexing confirmed normal / no crawl errors)");
+    if (sc.crawlIssue === false) ruledOut.push("crawlIssue = false (crawl confirmed normal / no bot block)");
+    if (sc.canonicalIssue === false) ruledOut.push("canonicalIssue = false (canonical confirmed normal)");
+    if (sc.manualAction === false) ruledOut.push("manualAction = false (no manual action penalty)");
+    if (sc.referringDomainLoss === false) ruledOut.push("referringDomainLoss = false (backlinks/referring domains intact, no link loss)");
+    if (sc.coreUpdateOccurred === false) ruledOut.push("coreUpdateOccurred = false (NO Core Update occurred)");
+    if (sc.negativeSeo === false) ruledOut.push("negativeSeo = false (ruled out negative SEO attack)");
+
+    if (ruledOut.length > 0) {
+      lines.push("- Confirmed Ruled-Out Conditions (DO NOT recommend these as primary root cause or first troubleshooting action):");
+      for (const ro of ruledOut) {
+        lines.push(`  * ${ro}`);
+      }
+      lines.push("  * DIRECTIVE: Focus immediately on surviving plausible causes (search intent shift, competitor optimization, internal link structure, commercial page UX/intent mismatch).");
+    }
+  }
+
   if (contract.groundedFacts.length > 0) {
     lines.push("- Compact Grounded Evidence Facts:");
     for (const gf of contract.groundedFacts) {
@@ -772,4 +799,64 @@ export function formatContractForPrompt(contract: AnswerContract): string {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Diagnostic validator to detect CONSTRAINT_IGNORED violations in generated answers.
+ */
+export function validateAnswerConstraints(
+  answerText: string,
+  contract: AnswerContract
+): { isValid: boolean; violation?: string } {
+  if (!contract.scenarioConstraints) {
+    return { isValid: true };
+  }
+  const lower = answerText.toLowerCase();
+  const sc = contract.scenarioConstraints;
+
+  // If indexing or crawl is confirmed normal (not an issue)
+  if (sc.indexingIssue === false || sc.crawlIssue === false) {
+    const forbiddenFirstSteps = [
+      "check indexing",
+      "kiểm tra indexing",
+      "kiểm tra crawl",
+      "check crawl",
+      "robots.txt",
+      "sitemap",
+      "lỗi index",
+      "lỗi crawl",
+      "đợi index",
+      "chặn crawl"
+    ];
+    for (const f of forbiddenFirstSteps) {
+      if (lower.includes(f)) {
+        return {
+          isValid: false,
+          violation: `CONSTRAINT_IGNORED: Answer recommended "${f}" even though indexing/crawl was explicitly ruled out.`
+        };
+      }
+    }
+  }
+
+  // If Core Update is explicitly ruled out
+  if (sc.coreUpdateOccurred === false) {
+    if (lower.includes("do core update") || lower.includes("sau core update") || lower.includes("ảnh hưởng của core update")) {
+      return {
+        isValid: false,
+        violation: "CONSTRAINT_IGNORED: Answer attributed drop to Core Update even though Core Update was explicitly ruled out."
+      };
+    }
+  }
+
+  // If negative SEO is explicitly ruled out
+  if (sc.negativeSeo === false) {
+    if (lower.includes("bị bắn link bẩn") || lower.includes("do negative seo") || lower.includes("disavow ngay")) {
+      return {
+        isValid: false,
+        violation: "CONSTRAINT_IGNORED: Answer attributed drop to negative SEO even though negative SEO was explicitly ruled out."
+      };
+    }
+  }
+
+  return { isValid: true };
 }

@@ -1,3 +1,6 @@
+import type { ScenarioConstraints } from "./scenarioConstraints";
+import { extractScenarioConstraints } from "./scenarioConstraints";
+import { matchUnicodePattern } from "../shared/semanticTextMatcher";
 import {
   calculateIntentScores,
   classifyQuestionIntent,
@@ -61,6 +64,9 @@ export interface SemanticEvidenceState {
   rankingSignals: string[];
   indexingSignals: string[];
 
+  // Scenario constraints (negation-aware ruled-out / confirmed conditions)
+  scenarioConstraints?: ScenarioConstraints;
+
   // Intent inference results
   intentScores: IntentSignalScore[];
   bestIntent: QuestionIntentCategory;
@@ -87,6 +93,7 @@ export function createInitialEvidenceState(turnId?: string): SemanticEvidenceSta
     allocationSignals: [],
     rankingSignals: [],
     indexingSignals: [],
+    scenarioConstraints: { provenance: [] },
     intentScores: [],
     bestIntent: "UNKNOWN",
     confidence: 0.2
@@ -285,7 +292,8 @@ export function extractAllocationSignals(text: string): string[] {
 }
 
 export function extractComparisonSignals(text: string): string[] {
-  const matches = text.match(/(?:^|\s)(con a|con b|domain a|domain b|site a|site b|chọn con nào|lấy không|có lấy không|có mua không|nên mua|lấy con nào|traffic bằng 0|traffic = 0|traffic không|traffic thật)(?=\s|$|[.,?!])/gi);
+  const pattern = "(?:con\\s+[ab]|domain\\s+[ab]|site\\s+[ab]|chọn\\s+con\\s+nào|lấy\\s+không|có\\s+lấy\\s+không|có\\s+mua\\s+không|nên\\s+mua|lấy\\s+con\\s+nào|traffic\\s+bằng\\s+0|traffic\\s*=\\s*0|traffic\\s+không|traffic\\s+thật)";
+  const matches = matchUnicodePattern(text, pattern);
   return matches ? Array.from(new Set(matches.map((m) => m.trim().toLowerCase()))) : [];
 }
 
@@ -466,6 +474,9 @@ export class SemanticEvidenceAccumulator {
         this.state.rankingSignals.push(r);
       }
     }
+
+    // 13. Scenario constraints (negations and explicit ruled-out hypotheses)
+    this.state.scenarioConstraints = extractScenarioConstraints(this.state.latestTranscript);
   }
 
   private reevaluateIntent(): void {

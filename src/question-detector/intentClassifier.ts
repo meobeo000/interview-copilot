@@ -1,4 +1,5 @@
 import type { SemanticEvidenceState } from "./semanticEvidence";
+import { isConceptNegated, matchUnicodePattern } from "../shared/semanticTextMatcher";
 
 export type QuestionIntentCategory =
   | "PROJECT_EXPERIENCE"
@@ -142,9 +143,10 @@ function extractDomainComparisonSignals(text: string, state?: SemanticEvidenceSt
   const tokens: string[] = [];
 
   // Strictly require domain evaluation context (not general anchor link context)
+  const domainContextPattern = "expired\\s+domain|tên\\s+miền|con\\s+[ab]|site\\s+[ab]|domain\\s+[ab]|tld|\\.in|\\.me|\\.my|\\.nl|\\.co\\.in|có\\s+mua\\s+không|có\\s+lấy\\s+không|chọn\\s+con\\s+nào|lấy\\s+không|dr\\s+cao|organic\\s+traffic|traffic\\s*=\\s*0|traffic\\s+bằng\\s+0|traffic\\s+không|traffic\\s+thật|wayback|a\\s*href|ah\\s*ref|ai\\s*rép|ahrefs|đối\\s+thủ";
   const hasDomainContext =
-    text.match(/\b(expired domain|tên miền|con a|con b|site a|site b|domain a|domain b|tld|\.in|\.me|\.my|\.nl|\.co\.in|có mua không|có lấy không|chọn con nào|lấy không|dr cao|organic traffic|traffic = 0|traffic bằng 0|traffic không|traffic thật|wayback|a href|ah ref|ai rép|ahrefs|đối thủ)\b/i) ||
-    (text.match(/\bdomain\b/i) && !text.match(/\breferring domain\b/i)) ||
+    Boolean(matchUnicodePattern(text, domainContextPattern)) ||
+    (Boolean(matchUnicodePattern(text, "domain")) && !text.match(/referring\s+domain/i)) ||
     (state && (state.drValues.length > 0 || state.comparisonSignals.length > 0));
 
   if (!hasDomainContext) {
@@ -153,15 +155,15 @@ function extractDomainComparisonSignals(text: string, state?: SemanticEvidenceSt
 
   // Domain identifiers
   const domainMatches =
-    text.match(/\b(expired domain|tên miền|con domain|tld|\.in|\.me|\.my|\.nl|\.co\.in)\b/gi) ||
-    (text.match(/\bdomain\b/i) && !text.match(/\breferring domain\b/i) ? ["domain"] : null);
+    matchUnicodePattern(text, "expired\\s+domain|tên\\s+miền|con\\s+domain|tld|\\.in|\\.me|\\.my|\\.nl|\\.co\\.in") ||
+    (matchUnicodePattern(text, "domain") && !text.match(/referring\s+domain/i) ? ["domain"] : null);
   if (domainMatches) {
     breakdown.domainLexical = 4;
     tokens.push(...domainMatches);
   }
 
   // Domain comparison entities (con A, con B, domain A, domain B, site A, site B)
-  const comparisonMatches = text.match(/\b(con a|con b|domain a|domain b|site a|site b)\b/gi);
+  const comparisonMatches = matchUnicodePattern(text, "con\\s+[ab]|domain\\s+[ab]|site\\s+[ab]");
   if (comparisonMatches) {
     breakdown.domainEntities = 6;
     tokens.push(...comparisonMatches);
@@ -171,7 +173,7 @@ function extractDomainComparisonSignals(text: string, state?: SemanticEvidenceSt
   }
 
   // Domain metrics & tools (DR, UR, organic traffic, Wayback, ahrefs competitor domain check)
-  const metricMatches = text.match(/\b(dr \d+|dr cao|ur \d+|ur|organic traffic|traffic bằng 0|traffic = 0|traffic không|traffic thật|wayback|a href|ah ref|ai rép|ahrefs|referring domain|backlink profile|đối thủ)\b/gi);
+  const metricMatches = matchUnicodePattern(text, "dr\\s+\\d+|dr\\s+cao|ur\\s+\\d+|ur|organic\\s+traffic|traffic\\s+bằng\\s+0|traffic\\s*=\\s*0|traffic\\s+không|traffic\\s+thật|wayback|a\\s*href|ah\\s*ref|ai\\s*rép|ahrefs|referring\\s+domain|backlink\\s+profile|đối\\s+thủ");
   if (metricMatches) {
     breakdown.metrics = metricMatches.length * 3;
     tokens.push(...metricMatches);
@@ -181,7 +183,7 @@ function extractDomainComparisonSignals(text: string, state?: SemanticEvidenceSt
   }
 
   // Domain decision language
-  const decisionMatches = text.match(/\b(chọn con nào|lấy không|có lấy không|có mua không|nên mua|lấy con nào|chọn domain nào|check referring domain|backlink profile của đối thủ)\b/gi);
+  const decisionMatches = matchUnicodePattern(text, "chọn\\s+con\\s+nào|lấy\\s+không|có\\s+lấy\\s+không|có\\s+mua\\s+không|nên\\s+mua|lấy\\s+con\\s+nào|chọn\\s+domain\\s+nào|check\\s+referring\\s+domain|backlink\\s+profile\\s+của\\s+đối\\s+thủ");
   if (decisionMatches) {
     breakdown.decisionLanguage = 4;
     tokens.push(...decisionMatches);
@@ -195,8 +197,9 @@ function extractIndexingSignals(text: string, state?: SemanticEvidenceState): Si
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
-  // Bot opening / crawl signals
-  const botMatches = text.match(/\b(mở bot|mở cổng|crawl bot|bật index|mở index|crawl)\b/gi);
+  // Bot opening / crawl signals - ensure not negated ("không có lỗi crawl")
+  const negCrawl = isConceptNegated(text, ["crawl", "index", "bot", "lỗi crawl", "lỗi index"]);
+  const botMatches = !negCrawl.isNegated ? text.match(/\b(mở bot|mở cổng|crawl bot|bật index|mở index|crawl)\b/gi) : null;
   if (botMatches) {
     breakdown.botActivity = 5;
     tokens.push(...botMatches);
@@ -270,6 +273,12 @@ function extractCoreUpdateSignals(text: string): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
+  // Negation check: "không có Core Update", "không phải do Core Update", etc.
+  const neg = isConceptNegated(text, ["core update", "co update", "thuật toán", "cập nhật thuật toán"]);
+  if (neg.isNegated) {
+    return { score: 0, tokens: [], breakdown: {} };
+  }
+
   const updateMatches = text.match(/\b(core update|co update|co up date|core up date|update của google|thuật toán|google update|helpful content|spam update)\b/gi);
   if (updateMatches) {
     breakdown.updateMention = 7;
@@ -278,7 +287,7 @@ function extractCoreUpdateSignals(text: string): SignalExtractionResult {
     return { score: 0, tokens: [], breakdown: {} };
   }
 
-  const impactMatches = text.match(/\b(ảnh hưởng|tụt dốc|tụt traffic|mất traffic|bị phạt|khắc phục|hồi phục|recovery|sau update)\b/gi);
+  const impactMatches = text.match(/\b(ảnh hưởng|tụt dốc|tụt traffic|mất traffic|bị phạt|khắc phục|hồi phục|recovery|sau update|giảm|tụt|rơi|sau một đợt|24 giờ đầu|làm gì)\b/gi);
   if (impactMatches) {
     breakdown.impactOrRecovery = 5;
     tokens.push(...impactMatches);
@@ -324,6 +333,12 @@ function extractGscDropSignals(text: string, state?: SemanticEvidenceState): Sig
 function extractNegativeSeoSignals(text: string): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
+
+  // Negation check: "không phải negative SEO", "không phải link bẩn"
+  const neg = isConceptNegated(text, ["negative seo", "link bẩn", "link xấu", "spam link", "đối thủ chơi xấu"]);
+  if (neg.isNegated) {
+    return { score: 0, tokens: [], breakdown: {} };
+  }
 
   const negativeMatches = text.match(/\b(negative seo|bắn link bẩn|spam link|link bẩn|đối thủ chơi xấu|bị dính link xấu|disavow|bắn link xấu|spam backlink|anchor rác)\b/gi);
   if (negativeMatches) {

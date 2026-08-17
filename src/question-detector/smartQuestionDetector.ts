@@ -1,6 +1,7 @@
 import type { QuestionDetectionResult } from "../shared/types";
 import { classifyQuestionIntent, type QuestionIntent } from "./intentClassifier";
 import { SemanticEvidenceAccumulator, type SemanticEvidenceState } from "./semanticEvidence";
+import { QuestionCommitGate } from "./questionCommitGate";
 import type { QuestionDetector } from "./types";
 
 export interface QuestionCandidate {
@@ -258,15 +259,17 @@ export class SmartQuestionDetector implements QuestionDetector {
 
     this.clearTimers();
     const intent = this.detectIntent(trimmed);
+    const gateEval = QuestionCommitGate.evaluate(trimmed, this.accumulator.getState(), intent);
 
-    // If text has meaningful question intent (not UNKNOWN) and has adequate length / question structure
-    if (intent.category !== "UNKNOWN" && (hasQuestionIntent(trimmed) || trimmed.split(/\s+/).length >= 4)) {
+    if (gateEval.decision === "COMMIT") {
       onFinalizeCandidate({
         text: trimmed,
         isComplete: true,
-        reason: "Provider speech_final endpoint reached.",
+        reason: `QuestionCommitGate: ${gateEval.reason}`,
         intent
       });
+    } else if (typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
+      console.log(`[QUESTION COMMIT GATE] decision: ${gateEval.decision} | reason: ${gateEval.reason} | text: "${trimmed}"`);
     }
   }
 
