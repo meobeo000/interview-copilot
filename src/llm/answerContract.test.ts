@@ -53,16 +53,22 @@ describe("Phase 4.1.1: Grounding Correctness Patch Tests", () => {
       expect(pct).toBe("percent:40");
     });
 
-    it("Test 1D: normalizes money facts to canonical representation", () => {
+    it("Test 1D: normalizes money facts to canonical representation and preserves currency", () => {
       const fact1 = "budget: 20tr";
       const fact2 = "budget: 20 triệu";
       const fact3 = "20 củ";
       const fact4 = "ngân sách hai mươi triệu";
+      const factUsd1 = "20 USD";
+      const factUsd2 = "budget: $50";
 
       expect(normalizeMoneyFact(fact1)).toBe("budget:20000000:vnd");
       expect(normalizeMoneyFact(fact2)).toBe("budget:20000000:vnd");
       expect(normalizeMoneyFact(fact3)).toBe("budget:20000000:vnd");
       expect(normalizeMoneyFact(fact4)).toBe("budget:20000000:vnd");
+      expect(normalizeMoneyFact("20 triệu")).toBe("budget:20000000:vnd");
+
+      expect(normalizeMoneyFact(factUsd1)).toBe("budget:20:usd");
+      expect(normalizeMoneyFact(factUsd2)).toBe("budget:50:usd");
 
       expect(normalizeRequiredFact(fact1)).toBe(normalizeRequiredFact(fact2));
     });
@@ -247,6 +253,28 @@ describe("Phase 4.1.1: Grounding Correctness Patch Tests", () => {
       });
 
       expect(contract.allocationGrounding).toBe("PROPOSED");
+    });
+
+    it("Regression: does NOT qualify when chunk spend categories (PBN + backlink) do not match question categories (Content + Entity)", () => {
+      const pbnBacklinkChunk: KnowledgeChunk = {
+        id: "chunk-pbn-backlink",
+        sourceType: "practitioner_playbook",
+        topic: "BUDGET",
+        content: "Budget 20 triệu: 12 triệu PBN, 8 triệu backlink.",
+        title: "PBN and Backlink Budget",
+        tags: ["pbn", "backlink"],
+        confidence: "practitioner_experience",
+        canClaimAsPersonalExperience: false
+      };
+
+      const contract = buildAnswerContract({
+        question: "20 triệu phân bổ Content và Entity thế nào?",
+        intent: "BUDGET_ALLOCATION",
+        retrievedChunks: [pbnBacklinkChunk]
+      });
+
+      expect(contract.allocationGrounding).toBe("PROPOSED");
+      expect(contract.groundedFacts.length).toBe(0);
     });
 
     it("Test 3D: handles percentage-based practitioner chunk without creating false 20m VND claims", () => {

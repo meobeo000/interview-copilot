@@ -94,14 +94,27 @@ const SPOKEN_NUMBER_MAP: Record<string, number> = {
 
 export function normalizeMoneyFact(fact: string): string | null {
   const lower = fact.toLowerCase().trim();
-  // Strictly require explicit money context or units (triệu, tr, củ, k, vnd, vnđ, usd, $, budget, ngân sách)
-  const moneyContextRegex = /(?:budget|ngân\s*sách|chi|tiền|giá)?[:\s]*(\d+(?:\.\d+)?|hai mươi|ba mươi|bốn mươi|năm mươi|sáu mươi|bảy mươi|tám mươi|chín mươi|mười)\s*(triệu|tr|củ|m|k|vnd|vnđ|usd|\$)/i;
-  const match = lower.match(moneyContextRegex);
-  if (!match) {
+
+  // Match prefix currency symbol like $50 or USD 100
+  const prefixMatch = lower.match(/(?:budget|ngân\s*sách|chi|tiền|giá)?[:\s]*(\$|usd|vnd|vnđ)\s*(\d+(?:\.\d+)?)/i);
+  if (prefixMatch) {
+    const symbol = prefixMatch[1].toLowerCase();
+    const numVal = parseFloat(prefixMatch[2]);
+    if (!isNaN(numVal)) {
+      const currency = symbol === "$" || symbol === "usd" ? "usd" : "vnd";
+      return `budget:${Math.round(numVal)}:${currency}`;
+    }
+  }
+
+  // Match suffix currency like 20 USD, 20 triệu, 20tr, 20 củ
+  const suffixMatch = lower.match(
+    /(?:budget|ngân\s*sách|chi|tiền|giá)?[:\s]*(\d+(?:\.\d+)?|hai mươi|ba mươi|bốn mươi|năm mươi|sáu mươi|bảy mươi|tám mươi|chín mươi|mười)\s*(triệu|tr|củ|m|k|vnd|vnđ|usd|\$)/i
+  );
+  if (!suffixMatch) {
     return null;
   }
 
-  let numStr = match[1].toLowerCase();
+  let numStr = suffixMatch[1].toLowerCase();
   for (const [spoken, n] of Object.entries(SPOKEN_NUMBER_MAP)) {
     if (numStr === spoken) {
       numStr = String(n);
@@ -112,15 +125,24 @@ export function normalizeMoneyFact(fact: string): string | null {
   const numVal = parseFloat(numStr);
   if (isNaN(numVal)) return null;
 
-  const unit = match[2].toLowerCase();
+  const unit = suffixMatch[2].toLowerCase();
   let amount = numVal;
+  let currency = "vnd";
   if (unit === "triệu" || unit === "tr" || unit === "củ" || unit === "m") {
     amount = numVal * 1_000_000;
+    currency = "vnd";
   } else if (unit === "k") {
     amount = numVal * 1_000;
+    currency = "vnd";
+  } else if (unit === "usd" || unit === "$") {
+    amount = numVal;
+    currency = "usd";
+  } else if (unit === "vnd" || unit === "vnđ") {
+    amount = numVal;
+    currency = "vnd";
   }
 
-  return `budget:${Math.round(amount)}:vnd`;
+  return `budget:${Math.round(amount)}:${currency}`;
 }
 
 export function normalizeDrFact(fact: string): string | null {
@@ -382,8 +404,13 @@ export function extractGroundedContractFacts(
         (cat) => questionSpendCategories.length === 0 || questionSpendCategories.includes(cat)
       );
 
-      // Must have at least TWO qualifying spend categories
-      if (relevantMatches.length >= 2 || matchingCategories.length >= 2) {
+      // Must have at least TWO qualifying spend categories that match the question categories (if supplied)
+      const qualifiesSpendCategories =
+        questionSpendCategories.length > 0
+          ? relevantMatches.length >= Math.min(2, questionSpendCategories.length)
+          : matchingCategories.length >= 2;
+
+      if (qualifiesSpendCategories) {
         const isPercentage = contentLower.includes("%");
         const budgetLines = content.split("\n").filter((l) => l.trim().length > 0);
         facts.push({
