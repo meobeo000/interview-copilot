@@ -12,10 +12,13 @@ export type AnswerContractType =
 
 export type AllocationGrounding = "EXACT_SOURCE" | "PRACTITIONER_EXAMPLE" | "PROPOSED";
 
+export type CandidateEvidenceType = "PROJECT" | "EXPLICIT_EXPERIENCE_NOTE" | "NONE";
+
 export interface CandidateExperienceEvidence {
   allowed: boolean;
   supportedTopics: string[];
   supportingProjectIds: string[];
+  evidenceType: CandidateEvidenceType;
   reason: string;
 }
 
@@ -24,6 +27,7 @@ export interface GroundedContractFact {
   sourceType: KnowledgeSourceType;
   sourceId: string;
   topic?: string;
+  isPercentageBased?: boolean;
   confidence: number;
 }
 
@@ -62,58 +66,193 @@ const FORBIDDEN_AI_PHRASES = [
   "chiến lược toàn diện"
 ] as const;
 
+const SPOKEN_NUMBER_MAP: Record<string, number> = {
+  "một": 1,
+  "hai": 2,
+  "ba": 3,
+  "bốn": 4,
+  "năm": 5,
+  "sáu": 6,
+  "bảy": 7,
+  "tám": 8,
+  "chín": 9,
+  "mười": 10,
+  "hai mươi": 20,
+  "ba mươi": 30,
+  "bốn mươi": 40,
+  "năm mươi": 50,
+  "sáu mươi": 60,
+  "bảy mươi": 70,
+  "tám mươi": 80,
+  "chín mươi": 90,
+  "trăm": 100
+};
+
+// ---------------------------------------------------------------------------
+// 1. Typed Fact Normalizers
+// ---------------------------------------------------------------------------
+
+export function normalizeMoneyFact(fact: string): string | null {
+  const lower = fact.toLowerCase().trim();
+  // Strictly require explicit money context or units (triệu, tr, củ, k, vnd, vnđ, usd, $, budget, ngân sách)
+  const moneyContextRegex = /(?:budget|ngân\s*sách|chi|tiền|giá)?[:\s]*(\d+(?:\.\d+)?|hai mươi|ba mươi|bốn mươi|năm mươi|sáu mươi|bảy mươi|tám mươi|chín mươi|mười)\s*(triệu|tr|củ|m|k|vnd|vnđ|usd|\$)/i;
+  const match = lower.match(moneyContextRegex);
+  if (!match) {
+    return null;
+  }
+
+  let numStr = match[1].toLowerCase();
+  for (const [spoken, n] of Object.entries(SPOKEN_NUMBER_MAP)) {
+    if (numStr === spoken) {
+      numStr = String(n);
+      break;
+    }
+  }
+
+  const numVal = parseFloat(numStr);
+  if (isNaN(numVal)) return null;
+
+  const unit = match[2].toLowerCase();
+  let amount = numVal;
+  if (unit === "triệu" || unit === "tr" || unit === "củ" || unit === "m") {
+    amount = numVal * 1_000_000;
+  } else if (unit === "k") {
+    amount = numVal * 1_000;
+  }
+
+  return `budget:${Math.round(amount)}:vnd`;
+}
+
+export function normalizeDrFact(fact: string): string | null {
+  const lower = fact.toLowerCase().trim();
+  if (!lower.includes("dr")) {
+    return null;
+  }
+
+  const matches = Array.from(lower.matchAll(/(?:dr)\s*(\d+)/gi));
+  if (matches.length === 0) {
+    return null;
+  }
+
+  const drValues = matches
+    .map((m) => parseInt(m[1], 10))
+    .filter((n) => !isNaN(n))
+    .sort((a, b) => a - b);
+
+  return `dr:${drValues.join(",")}`;
+}
+
+export function normalizePercentageFact(fact: string): string | null {
+  const lower = fact.toLowerCase().trim();
+  const match = lower.match(/(\d+(?:\.\d+)?)\s*(?:%|phần\s*trăm|percent)/i);
+  if (!match) {
+    return null;
+  }
+  const val = parseFloat(match[1]);
+  return isNaN(val) ? null : `percent:${val}`;
+}
+
+export function normalizePositionFact(fact: string): string | null {
+  const lower = fact.toLowerCase().trim();
+  if (!lower.includes("position") && !lower.includes("vị trí") && !lower.includes("top")) {
+    return null;
+  }
+  const match = lower.match(/(?:position|vị trí|top)[:\s]*(\d+(?:\.\d+)?)/i);
+  if (!match) {
+    return null;
+  }
+  const val = parseFloat(match[1]);
+  return isNaN(val) ? null : `position:${val}`;
+}
+
+export function normalizeDurationFact(fact: string): string | null {
+  const lower = fact.toLowerCase().trim();
+  if (!lower.includes("ngày") && !lower.includes("tuần") && !lower.includes("tháng") && !lower.includes("day") && !lower.includes("week")) {
+    return null;
+  }
+  const match = lower.match(/(\d+|một|hai|ba|bốn|năm|mười)\s*(ngày|tuần|tháng|day|week|month)/i);
+  if (!match) {
+    return null;
+  }
+  let count = match[1];
+  if (count === "hai") count = "2";
+  else if (count === "ba") count = "3";
+  else if (count === "mười") count = "10";
+  return `duration:${count}_${match[2]}`;
+}
+
 /**
- * Normalizes monetary and numeric expressions to canonical comparable tokens.
- * E.g. "20 triệu", "20tr", "20 củ", "20m", "hai mươi triệu" -> "20 triệu"
+ * Normalizes any required fact safely using typed normalizers.
+ * Crucial guarantee: "DR 55" will NEVER normalize to "55 triệu".
+ */
+export function normalizeRequiredFact(fact: string): string {
+  const trimmed = fact.trim();
+  const money = normalizeMoneyFact(trimmed);
+  if (money) return money;
+
+  const dr = normalizeDrFact(trimmed);
+  if (dr) return dr;
+
+  const pct = normalizePercentageFact(trimmed);
+  if (pct) return pct;
+
+  const pos = normalizePositionFact(trimmed);
+  if (pos) return pos;
+
+  const dur = normalizeDurationFact(trimmed);
+  if (dur) return dur;
+
+  return trimmed.toLowerCase();
+}
+
+/**
+ * Compatibility wrapper for normalizeRequiredFact.
  */
 export function normalizeNumericFact(fact: string): string {
-  const lower = fact.toLowerCase().trim();
-  const moneyMatch = lower.match(/(?:budget:\s*)?(\d+(?:\.\d+)?|hai mươi|ba mươi|bốn mươi|năm mươi|mười)\s*(triệu|tr|củ|m|usd|\$)?/i);
-  if (moneyMatch) {
-    let num = moneyMatch[1];
-    if (num === "hai mươi") num = "20";
-    else if (num === "ba mươi") num = "30";
-    else if (num === "bốn mươi") num = "40";
-    else if (num === "năm mươi") num = "50";
-    else if (num === "mười") num = "10";
-    return `${num} triệu`;
-  }
-  return lower;
+  return normalizeRequiredFact(fact);
 }
+
+// ---------------------------------------------------------------------------
+// 2. Candidate Experience Verification
+// ---------------------------------------------------------------------------
 
 /**
  * Evaluates candidate profile to determine whether first-person claims
  * are permitted for the specific techniques/topics in the question.
+ *
+ * Strict Rule: seoSkills alone CANNOT enable autobiographical claims.
+ * Verified hands-on project descriptions or explicit experience notes are REQUIRED.
  */
 export function evaluateCandidateExperience(
   question: string,
-  intentCategory: QuestionIntentCategory,
+  _intentCategory: QuestionIntentCategory,
   profile?: CandidateProfile
 ): CandidateExperienceEvidence {
-  if (!profile || !profile.projects || profile.projects.length === 0) {
+  if (!profile) {
     return {
       allowed: false,
       supportedTopics: [],
       supportingProjectIds: [],
-      reason: "No candidate projects found in profile."
+      evidenceType: "NONE",
+      reason: "No candidate profile provided."
     };
   }
 
   const qLower = question.toLowerCase();
 
-  // Define technique/topic keywords that require strict project backing
+  // High-risk technique triggers that require explicit hands-on execution evidence
   const techniqueKeywords: Record<string, string[]> = {
     PBN: ["pbn", "vệ tinh", "site vệ tinh", "satellite site"],
     "Guest Post": ["guest post", "guestpost", "gét pót"],
     "expired domain": ["expired domain", "domain cũ", "tên miền cũ", "301 redirect"],
     "301 migration": ["301", "redirect 301", "chuyển hướng domain"],
     "iGaming SEO": ["igaming", "casino", "sports betting", "cá cược", "nhà cái", "uu88"],
-    "budget allocation": ["ngân sách", "budget", "20 triệu", "50 triệu", "phân bổ vốn"],
+    "budget allocation": ["ngân sách", "budget", "20 triệu", "50 triệu", "phân bổ vốn", "chia ngân sách"],
     "negative SEO": ["negative seo", "link bẩn", "disavow", "bắn link spam"],
     "Core Update recovery": ["core update", "tụt traffic", "recovery", "thuật toán"]
   };
 
-  // Identify which topics the question is asking about
+  // Identify targeted topics
   const targetedTopics: string[] = [];
   for (const [topic, triggers] of Object.entries(techniqueKeywords)) {
     if (triggers.some((tr) => qLower.includes(tr))) {
@@ -121,58 +260,91 @@ export function evaluateCandidateExperience(
     }
   }
 
-  // If question is a generic SEO question without special high-risk technique claims
+  // If question is general SEO without specialized technique claims
   if (targetedTopics.length === 0) {
+    const hasProjects = Boolean(profile.projects && profile.projects.length > 0);
     return {
-      allowed: true,
+      allowed: hasProjects,
       supportedTopics: ["General SEO"],
-      supportingProjectIds: profile.projects.map((p) => p.name),
-      reason: "General SEO background supported by candidate profile."
+      supportingProjectIds: (profile.projects || []).map((p) => p.name),
+      evidenceType: hasProjects ? "PROJECT" : "NONE",
+      reason: hasProjects
+        ? "General SEO background supported by candidate projects."
+        : "No candidate projects found in profile."
     };
   }
 
-  // Check candidate projects & experience notes for explicit coverage of targeted topics
+  // Hands-on execution check: inspect candidate projects and experienceNotes only
+  // seoSkills alone CANNOT enable autobiographical claims
   const supportedTopics: string[] = [];
   const supportingProjectIds: string[] = [];
+  let evidenceType: CandidateEvidenceType = "NONE";
 
-  const combinedCandidateCorpus = [
-    ...profile.projects.map((p) => `${p.name} ${p.role || ""} ${p.description || ""} ${p.metrics || ""}`),
-    profile.experienceNotes || "",
-    ...(profile.seoSkills || [])
-  ]
-    .join(" ")
-    .toLowerCase();
+  const projectCorpus = (profile.projects || [])
+    .map((p) => ({
+      name: p.name,
+      text: `${p.name} ${p.role || ""} ${p.description || ""} ${p.metrics || ""}`.toLowerCase()
+    }));
+
+  const noteCorpus = (profile.experienceNotes || "").toLowerCase();
 
   for (const topic of targetedTopics) {
     const triggers = techniqueKeywords[topic];
-    const isSupported = triggers.some((tr) => combinedCandidateCorpus.includes(tr));
-    if (isSupported) {
+    let topicSupported = false;
+
+    // Check project descriptions
+    for (const p of projectCorpus) {
+      if (triggers.some((tr) => p.text.includes(tr))) {
+        supportedTopics.push(topic);
+        supportingProjectIds.push(p.name);
+        evidenceType = "PROJECT";
+        topicSupported = true;
+        break;
+      }
+    }
+
+    // Check explicit experience notes
+    if (!topicSupported && triggers.some((tr) => noteCorpus.includes(tr))) {
       supportedTopics.push(topic);
-      for (const p of profile.projects) {
-        const pText = `${p.name} ${p.description || ""}`.toLowerCase();
-        if (triggers.some((tr) => pText.includes(tr))) {
-          supportingProjectIds.push(p.name);
-        }
+      if (evidenceType === "NONE") {
+        evidenceType = "EXPLICIT_EXPERIENCE_NOTE";
       }
     }
   }
 
-  // All targeted topics must be supported for first-person experience claims
-  const allSupported = targetedTopics.every((t) => supportedTopics.includes(t));
+  const allSupported = targetedTopics.length > 0 && targetedTopics.every((t) => supportedTopics.includes(t));
 
   return {
     allowed: allSupported && supportedTopics.length > 0,
-    supportedTopics,
+    supportedTopics: Array.from(new Set(supportedTopics)),
     supportingProjectIds: Array.from(new Set(supportingProjectIds)),
+    evidenceType: allSupported ? evidenceType : "NONE",
     reason: allSupported
-      ? `Candidate profile explicitly supports: ${supportedTopics.join(", ")}`
-      : `Candidate profile lacks project evidence for: ${targetedTopics.filter((t) => !supportedTopics.includes(t)).join(", ")}`
+      ? `Candidate profile has verified hands-on evidence for: ${supportedTopics.join(", ")}`
+      : `Candidate profile lacks hands-on project evidence for: ${targetedTopics.filter((t) => !supportedTopics.includes(t)).join(", ")}`
   };
 }
 
+// ---------------------------------------------------------------------------
+// 3. Grounded Fact Extraction & Allocation Qualification
+// ---------------------------------------------------------------------------
+
+const RECOGNIZED_SPEND_CATEGORIES = [
+  "content",
+  "entity",
+  "guest post",
+  "pbn",
+  "backlink",
+  "link nền",
+  "textlink"
+] as const;
+
 /**
  * Extracts compact grounded facts from retrieved knowledge chunks.
- * Fast, synchronous, in-memory (< 2ms).
+ * Strict Rule: A chunk qualifies as budget allocation evidence ONLY if:
+ * 1. Contains a recognizable money/budget amount.
+ * 2. Contains allocation language (chia, phân bổ, budget, ngân sách, X triệu cho, X% cho).
+ * 3. Contains at least TWO requested spend categories from the question.
  */
 export function extractGroundedContractFacts(
   retrievedChunks: KnowledgeChunk[] = [],
@@ -181,27 +353,45 @@ export function extractGroundedContractFacts(
   const facts: GroundedContractFact[] = [];
   const qLower = question.toLowerCase();
 
+  // Find spend categories present in the question
+  const questionSpendCategories = RECOGNIZED_SPEND_CATEGORIES.filter((cat) => qLower.includes(cat));
+
   for (const chunk of retrievedChunks) {
     const content = chunk.content;
     const contentLower = content.toLowerCase();
 
-    // 1. Budget breakdown facts (e.g. 6m Content, 20 triệu, 50 củ)
-    if (
+    // 1. Budget breakdown facts
+    const hasMoneyAmount =
       contentLower.includes("triệu") ||
+      contentLower.includes("tr ") ||
       contentLower.includes("budget") ||
       contentLower.includes("ngân sách") ||
-      contentLower.includes(" 6m") ||
-      contentLower.includes(" 5m") ||
-      contentLower.includes(" 3m") ||
-      contentLower.includes(" 4m")
-    ) {
-      const budgetLines = content.split("\n").filter((l) => l.trim().length > 0);
-      if (budgetLines.length > 0) {
+      contentLower.includes("%");
+
+    const hasAllocationLanguage =
+      contentLower.includes("phân bổ") ||
+      contentLower.includes("chia") ||
+      contentLower.includes("ngân sách") ||
+      contentLower.includes("budget") ||
+      /(\d+)\s*(?:triệu|%|m)\s*(?:cho|dành cho)/i.test(contentLower);
+
+    if (hasMoneyAmount && hasAllocationLanguage) {
+      // Check matching spend categories
+      const matchingCategories = RECOGNIZED_SPEND_CATEGORIES.filter((cat) => contentLower.includes(cat));
+      const relevantMatches = matchingCategories.filter(
+        (cat) => questionSpendCategories.length === 0 || questionSpendCategories.includes(cat)
+      );
+
+      // Must have at least TWO qualifying spend categories
+      if (relevantMatches.length >= 2 || matchingCategories.length >= 2) {
+        const isPercentage = contentLower.includes("%");
+        const budgetLines = content.split("\n").filter((l) => l.trim().length > 0);
         facts.push({
           value: budgetLines.slice(0, 3).join("; "),
           sourceType: chunk.sourceType,
           sourceId: chunk.id,
           topic: chunk.topic,
+          isPercentageBased: isPercentage,
           confidence: 0.95
         });
         continue;
@@ -235,18 +425,24 @@ export function extractGroundedContractFacts(
     }
 
     // 3. Domain selection / General SEO facts
-    const firstLine = content.split("\n").find((l) => l.trim().length > 0) || content.slice(0, 100);
-    facts.push({
-      value: firstLine.trim(),
-      sourceType: chunk.sourceType,
-      sourceId: chunk.id,
-      topic: chunk.topic,
-      confidence: 0.9
-    });
+    if (qLower.includes("domain") || chunk.topic === "DOMAIN_SELECTION" || chunk.topic === "EXPIRED_DOMAIN") {
+      const firstLine = content.split("\n").find((l) => l.trim().length > 0) || content.slice(0, 100);
+      facts.push({
+        value: firstLine.trim(),
+        sourceType: chunk.sourceType,
+        sourceId: chunk.id,
+        topic: chunk.topic,
+        confidence: 0.9
+      });
+    }
   }
 
   return facts;
 }
+
+// ---------------------------------------------------------------------------
+// 4. Contract Builder
+// ---------------------------------------------------------------------------
 
 /**
  * Builds an explicit question-to-answer contract describing WHAT Gemini must answer.
@@ -327,9 +523,15 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
   // Determine Allocation Grounding Mode
   let allocationGrounding: AllocationGrounding | undefined;
   if (intentCategory === "BUDGET_ALLOCATION") {
-    const hasCandidateBudgetExp = candidateExperience.allowed && candidateExperience.supportedTopics.includes("budget allocation");
+    const hasCandidateBudgetExp =
+      candidateExperience.allowed && candidateExperience.supportedTopics.includes("budget allocation");
     const hasPractitionerBudgetChunk = groundedFacts.some(
-      (f) => f.sourceType === "practitioner_playbook" && (f.value.includes("triệu") || f.value.includes("Content"))
+      (f) =>
+        f.sourceType === "practitioner_playbook" &&
+        (f.value.toLowerCase().includes("content") ||
+          f.value.toLowerCase().includes("entity") ||
+          f.value.toLowerCase().includes("pbn") ||
+          f.value.toLowerCase().includes("guest post"))
     );
 
     if (hasCandidateBudgetExp) {
@@ -355,7 +557,7 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
       } else if (allocationGrounding === "EXACT_SOURCE") {
         firstSentenceDirective = `Sentence 1 MUST state the exact allocation from candidate experience across the requested categories (${requiredEntities.join(", ") || "Content, Entity, Guest Post, PBN"}).`;
       } else {
-        firstSentenceDirective = `Sentence 1 MUST give a concrete proposed allocation across the requested categories (${requiredEntities.join(", ") || "Content, Entity, Guest Post, PBN"}). Present numbers as a reasonable strategy proposal (e.g. "Với 20 triệu thì em có thể chia khoảng..."), not as an ungrounded historical fact.`;
+        firstSentenceDirective = `Sentence 1 MUST use clear proposal/approximation language across the requested categories (${requiredEntities.join(", ") || "Content, Entity, Guest Post, PBN"}). Acceptable opening patterns: "Với 20 triệu thì em có thể chia khoảng...", "Với case này em sẽ đề xuất khoảng...", "Nếu chưa có dữ liệu lịch sử thì em tạm chia khoảng...". Do NOT present numbers as ungrounded historical fact.`;
       }
       preferredStructure = "Sentence 1: Concrete numerical breakdown across requested categories. Sentence 2-3: Strategy reason for each allocation (foundation/on-page first, link timing). Sentence 4: Signal-based conditional adjustment based on GSC indexing/impressions.";
       maxWords = 120;
@@ -409,12 +611,16 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
     `Do NOT use generic filler phrases: ${FORBIDDEN_AI_PHRASES.map((p) => `"${p}"`).join(", ")}`,
     "Do NOT write an article, essay, or academic definition. Generate natural spoken Vietnamese for an interview.",
     candidateExperience.allowed
-      ? `Candidate has verified project experience in: ${candidateExperience.supportedTopics.join(", ")}. First-person framing is permitted for these topics.`
-      : `Do NOT claim personal candidate experience (Do NOT say 'Em đã từng...', 'Ở project trước em...'). Candidate profile lacks project evidence. Use hypothetical practitioner framing ('Với case này em sẽ...', 'Hướng xử lý của em là...').`,
+      ? `Candidate has verified hands-on project evidence in: ${candidateExperience.supportedTopics.join(", ")}. First-person framing is permitted for these topics.`
+      : `Do NOT claim personal candidate experience (Do NOT say 'Em đã từng...', 'Ở project trước em...'). Candidate profile lacks hands-on project evidence. Use hypothetical practitioner framing ('Với case này em sẽ...', 'Hướng xử lý của em là...').`,
     requiredEntities.length > 0
       ? `Do NOT ignore or replace requested entities. You MUST cover: ${requiredEntities.join(", ")}.`
       : "Do NOT drift into unrelated SEO topics."
   ];
+
+  if (allocationGrounding === "PROPOSED") {
+    forbiddenBehaviors.push("In PROPOSED mode, do NOT present proposed numbers as known historical facts or candidate personal history. Sentence 1 MUST use proposal/approximation wording.");
+  }
 
   const contractBuildMs = Math.round((performance.now() - start) * 100) / 100;
 
@@ -455,9 +661,9 @@ export function isContractCompatible(
     };
   }
 
-  // 2. Normalized Required Facts Compatibility
-  const provNormalizedFacts = provisional.requiredFacts.map(normalizeNumericFact).sort().join(" | ");
-  const finalNormalizedFacts = finalContract.requiredFacts.map(normalizeNumericFact).sort().join(" | ");
+  // 2. Typed Normalized Required Facts Compatibility
+  const provNormalizedFacts = provisional.requiredFacts.map(normalizeRequiredFact).sort().join(" | ");
+  const finalNormalizedFacts = finalContract.requiredFacts.map(normalizeRequiredFact).sort().join(" | ");
   if (provNormalizedFacts && finalNormalizedFacts && provNormalizedFacts !== finalNormalizedFacts) {
     return {
       compatible: false,
@@ -530,6 +736,7 @@ export function formatContractForPrompt(contract: AnswerContract): string {
 
   lines.push("- Candidate Experience Rules:");
   lines.push(`  * Personal Claims Allowed: ${contract.candidateExperience.allowed ? "YES" : "NO"}`);
+  lines.push(`  * Evidence Type: ${contract.candidateExperience.evidenceType}`);
   lines.push(`  * Rationale: ${contract.candidateExperience.reason}`);
 
   lines.push("- Forbidden Behaviors:");

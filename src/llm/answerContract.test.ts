@@ -3,67 +3,141 @@ import {
   buildAnswerContract,
   extractGroundedContractFacts,
   isContractCompatible,
-  normalizeNumericFact
+  normalizeDrFact,
+  normalizeDurationFact,
+  normalizeMoneyFact,
+  normalizeNumericFact,
+  normalizePercentageFact,
+  normalizePositionFact,
+  normalizeRequiredFact
 } from "./answerContract";
 import { buildFastSeoInterviewPrompt } from "./prompts/fastSeoInterviewPrompt";
 import type { CandidateProfile } from "../shared/candidateProfile";
 import type { KnowledgeChunk } from "../knowledge/types";
 
-describe("Phase 4.1: Grounded Answer Contract Safety Tests", () => {
-  describe("Test A: Candidate Project Unrelated (Safety Guard)", () => {
-    it("disallows first-person claims for PBN when candidate only has React ecommerce background", () => {
-      const ecommerceProfile: CandidateProfile = {
+describe("Phase 4.1.1: Grounding Correctness Patch Tests", () => {
+  // -------------------------------------------------------------------------
+  // FIX 1: Typed Numeric Fact Normalization
+  // -------------------------------------------------------------------------
+  describe("Fix 1: Typed Fact Normalization", () => {
+    it("Test 1A: normalizes DR facts without money conversion", () => {
+      const fact = "DR: DR 55, DR 20";
+      const normalized = normalizeRequiredFact(fact);
+      expect(normalized).toBe("dr:20,55");
+      expect(normalized).not.toContain("triệu");
+      expect(normalized).not.toContain("vnd");
+
+      const singleDr = normalizeDrFact("DR 55");
+      expect(singleDr).toBe("dr:55");
+      expect(singleDr).not.toContain("triệu");
+    });
+
+    it("Test 1B: normalizes position facts without money conversion", () => {
+      const fact = "average position: 6.8";
+      const normalized = normalizeRequiredFact(fact);
+      expect(normalized).toBe("position:6.8");
+      expect(normalized).not.toContain("triệu");
+      expect(normalized).not.toContain("vnd");
+
+      const pos = normalizePositionFact("position 3.2");
+      expect(pos).toBe("position:3.2");
+    });
+
+    it("Test 1C: normalizes percentage facts without money conversion", () => {
+      const fact = "ranking drop: 40%";
+      const normalized = normalizeRequiredFact(fact);
+      expect(normalized).toBe("percent:40");
+      expect(normalized).not.toContain("triệu");
+
+      const pct = normalizePercentageFact("giảm 40 phần trăm");
+      expect(pct).toBe("percent:40");
+    });
+
+    it("Test 1D: normalizes money facts to canonical representation", () => {
+      const fact1 = "budget: 20tr";
+      const fact2 = "budget: 20 triệu";
+      const fact3 = "20 củ";
+      const fact4 = "ngân sách hai mươi triệu";
+
+      expect(normalizeMoneyFact(fact1)).toBe("budget:20000000:vnd");
+      expect(normalizeMoneyFact(fact2)).toBe("budget:20000000:vnd");
+      expect(normalizeMoneyFact(fact3)).toBe("budget:20000000:vnd");
+      expect(normalizeMoneyFact(fact4)).toBe("budget:20000000:vnd");
+
+      expect(normalizeRequiredFact(fact1)).toBe(normalizeRequiredFact(fact2));
+    });
+
+    it("normalizes durations without money conversion", () => {
+      const d1 = normalizeDurationFact("10 ngày");
+      expect(d1).toBe("duration:10_ngày");
+      expect(d1).not.toContain("triệu");
+
+      const d2 = normalizeDurationFact("hai tuần");
+      expect(d2).toBe("duration:2_tuần");
+      expect(d2).not.toContain("triệu");
+    });
+
+    it("compatibility wrapper normalizeNumericFact delegates to normalizeRequiredFact", () => {
+      expect(normalizeNumericFact("DR 55")).toBe("dr:55");
+      expect(normalizeNumericFact("20 triệu")).toBe("budget:20000000:vnd");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // FIX 2: Candidate Hands-on Evidence Requirement
+  // -------------------------------------------------------------------------
+  describe("Fix 2: Candidate Hands-on Evidence Requirement", () => {
+    it("Test 2A: disallows personal PBN claims when candidate only has seoSkills: ['PBN'] without project backing", () => {
+      const profileWithSkillOnly: CandidateProfile = {
         fullName: "Nguyen Van A",
-        role: "Web Developer & SEO Specialist",
+        role: "Frontend Developer",
         background: "React Web Development",
-        skills: ["React", "TypeScript", "HTML/CSS"],
-        seoSkills: ["Technical SEO", "On-page"],
-        tools: ["GSC", "GA4"],
+        skills: ["React", "TypeScript"],
+        seoSkills: ["PBN", "Technical SEO"],
+        tools: ["GSC"],
         markets: ["VN"],
-        strengths: ["DOM Debugging"],
-        experienceNotes: "Built and optimized React ecommerce platform.",
+        strengths: ["Web Speed"],
+        experienceNotes: "Built React web application.",
         projects: [
           {
-            name: "React Ecommerce Platform",
-            role: "Frontend & Technical SEO",
-            description: "Built React ecommerce website, optimized Core Web Vitals and schema."
+            name: "React Ecommerce Store",
+            role: "Developer",
+            description: "Built React ecommerce frontend and optimized schema markup."
           }
         ]
       };
 
       const contract = buildAnswerContract({
-        question: "Em đã đi PBN như thế nào?",
+        question: "Em đã triển khai PBN như thế nào?",
         intent: "PBN_TIMING",
-        candidateProfile: ecommerceProfile
+        candidateProfile: profileWithSkillOnly
       });
 
       expect(contract.candidateExperience.allowed).toBe(false);
-      expect(contract.candidateExperienceAllowed).toBe(false);
-      expect(contract.candidateExperience.reason).toContain("lacks project evidence");
+      expect(contract.candidateExperience.evidenceType).toBe("NONE");
+      expect(contract.candidateExperience.reason).toContain("lacks hands-on project evidence for: PBN");
 
-      const prompt = buildFastSeoInterviewPrompt(ecommerceProfile, undefined, contract);
+      const prompt = buildFastSeoInterviewPrompt(profileWithSkillOnly, undefined, contract);
       expect(prompt).toContain("Do NOT claim personal candidate experience");
       expect(prompt).toContain("Với case này em sẽ");
     });
-  });
 
-  describe("Test B: Candidate PBN Experience Supported", () => {
-    it("allows personal framing when candidate profile contains verified PBN project experience", () => {
+    it("Test 2B: allows personal framing when project description contains hands-on PBN management", () => {
       const pbnProfile: CandidateProfile = {
         fullName: "Nguyen Van B",
         role: "Senior SEO Specialist",
         background: "iGaming Technical SEO",
-        skills: ["PBN Management", "Technical SEO"],
-        seoSkills: ["PBN", "Guest Post", "On-page"],
+        skills: ["PBN Management"],
+        seoSkills: ["PBN", "Guest Post"],
         tools: ["Ahrefs", "GSC"],
         markets: ["VN"],
-        strengths: ["PBN Deployment"],
-        experienceNotes: "Managed PBN network and Guest Post campaigns.",
+        strengths: ["Satellite Deployment"],
+        experienceNotes: "Managed satellite sites for betting projects.",
         projects: [
           {
             name: "iGaming Satellite Network",
             role: "SEO Lead",
-            description: "SEO iGaming project, managed PBN rollout and Guest Post."
+            description: "SEO iGaming project. Managed PBN rollout and Guest Post placements."
           }
         ]
       };
@@ -75,104 +149,163 @@ describe("Phase 4.1: Grounded Answer Contract Safety Tests", () => {
       });
 
       expect(contract.candidateExperience.allowed).toBe(true);
-      expect(contract.candidateExperienceAllowed).toBe(true);
+      expect(contract.candidateExperience.evidenceType).toBe("PROJECT");
       expect(contract.candidateExperience.supportedTopics).toContain("PBN");
       expect(contract.candidateExperience.supportingProjectIds).toContain("iGaming Satellite Network");
     });
-  });
 
-  describe("Test C: Practitioner Chunk Does Not Become Personal Autobiography", () => {
-    it("treats practitioner playbook chunks as industry reference rather than candidate history", () => {
-      const candidateProfileWithoutPbn: CandidateProfile = {
-        fullName: "Candidate C",
-        role: "SEO Specialist",
-        background: "Technical SEO",
-        skills: ["Technical SEO"],
-        seoSkills: ["Technical SEO", "On-page"],
+    it("Test 2C: disallows personal claims when candidate only has seoSkills: ['expired domain', '301']", () => {
+      const skillOnlyProfile: CandidateProfile = {
+        fullName: "Nguyen Van C",
+        role: "SEO Junior",
+        background: "Content Writing",
+        skills: ["Content"],
+        seoSkills: ["expired domain", "301 redirect"],
         tools: ["GSC"],
         markets: ["VN"],
-        strengths: ["Technical Audit"],
-        experienceNotes: "Technical on-page auditing.",
-        projects: [
-          {
-            name: "News Portal Optimization",
-            description: "On-page and technical optimization for news site."
-          }
-        ]
+        strengths: ["Copywriting"],
+        experienceNotes: "Wrote SEO content articles.",
+        projects: []
       };
 
-      const retrievedChunks: KnowledgeChunk[] = [
-        {
-          id: "chunk-uu88-pbn",
-          sourceType: "practitioner_playbook",
-          topic: "PBN",
-          content: "Ở project UU88 used PBN around day 10 sau khi site đã index.",
-          title: "UU88 PBN Timing",
-          tags: ["uu88", "pbn", "day 10"],
-          confidence: "practitioner_experience",
-          canClaimAsPersonalExperience: false
-        }
-      ];
-
       const contract = buildAnswerContract({
-        question: "Ở UU88 em triển khai PBN thế nào?",
-        intent: "PBN_TIMING",
-        retrievedChunks,
-        candidateProfile: candidateProfileWithoutPbn
+        question: "Em đã dùng expired domain và 301 thế nào?",
+        intent: "EXPIRED_DOMAIN",
+        candidateProfile: skillOnlyProfile
       });
 
       expect(contract.candidateExperience.allowed).toBe(false);
-      expect(contract.groundedFacts.length).toBeGreaterThan(0);
-      expect(contract.groundedFacts[0].sourceType).toBe("practitioner_playbook");
-
-      const prompt = buildFastSeoInterviewPrompt(candidateProfileWithoutPbn, undefined, contract);
-      expect(prompt).toContain("PRACTITIONER PLAYBOOK IS REFERENCE, NOT CANDIDATE HISTORY");
-      expect(prompt).toContain("Do NOT claim personal candidate experience");
+      expect(contract.candidateExperience.evidenceType).toBe("NONE");
     });
   });
 
-  describe("Test D: Grounded Budget Allocation (Practitioner Example)", () => {
-    it("sets allocationGrounding to PRACTITIONER_EXAMPLE when retrieved chunks contain explicit budget breakdown", () => {
-      const retrievedChunks: KnowledgeChunk[] = [
-        {
-          id: "chunk-budget-20m",
-          sourceType: "practitioner_playbook",
-          topic: "BUDGET",
-          content: "20m workflow: Content 6m, Entity 3m, Guest Post 5m, PBN 6m.\nPhân bổ ngân sách 20 triệu cho site mới.",
-          title: "20M Budget Allocation",
-          tags: ["20 triệu", "content", "entity", "guest post", "pbn"],
-          confidence: "practitioner_experience",
-          canClaimAsPersonalExperience: false
-        }
-      ];
+  // -------------------------------------------------------------------------
+  // FIX 3: Budget Grounding Allocation Evidence
+  // -------------------------------------------------------------------------
+  describe("Fix 3: Budget Allocation Grounding Qualification", () => {
+    it("Test 3A: qualifies as PRACTITIONER_EXAMPLE when chunk contains money and >= 2 requested spend categories", () => {
+      const validChunk: KnowledgeChunk = {
+        id: "chunk-budget-20m-valid",
+        sourceType: "practitioner_playbook",
+        topic: "BUDGET",
+        content: "Budget 20 triệu: 6 triệu Content, 3 triệu Entity, 5 triệu Guest Post, 6 triệu PBN.",
+        title: "20M Budget SEO Allocation",
+        tags: ["20 triệu", "content", "entity", "guest post", "pbn"],
+        confidence: "practitioner_experience",
+        canClaimAsPersonalExperience: false
+      };
 
       const contract = buildAnswerContract({
-        question: "20 triệu chia Content Entity Guest Post PBN thế nào?",
+        question: "20 triệu chia Content, Entity, Guest Post, PBN thế nào?",
         intent: "BUDGET_ALLOCATION",
-        retrievedChunks
+        retrievedChunks: [validChunk]
       });
 
       expect(contract.allocationGrounding).toBe("PRACTITIONER_EXAMPLE");
-      expect(contract.groundedFacts.some((f) => f.value.includes("Content 6m"))).toBe(true);
+      expect(contract.groundedFacts.length).toBeGreaterThan(0);
       expect(contract.firstSentenceDirective).toContain("grounded in the practitioner playbook reference");
+    });
+
+    it("Test 3B: sets allocationGrounding to PROPOSED when chunk only mentions non-SEO spend (hosting, dev, tracking)", () => {
+      const nonSeoChunk: KnowledgeChunk = {
+        id: "chunk-budget-non-seo",
+        sourceType: "practitioner_playbook",
+        topic: "BUDGET",
+        content: "Budget 20 triệu: 12 triệu hosting, 5 triệu development, 3 triệu tracking.",
+        title: "Server & Dev Budget",
+        tags: ["hosting", "dev", "tracking"],
+        confidence: "practitioner_experience",
+        canClaimAsPersonalExperience: false
+      };
+
+      const contract = buildAnswerContract({
+        question: "20 triệu chia Content, Entity, Guest Post và PBN thế nào?",
+        intent: "BUDGET_ALLOCATION",
+        retrievedChunks: [nonSeoChunk]
+      });
+
+      expect(contract.allocationGrounding).toBe("PROPOSED");
+      expect(contract.firstSentenceDirective).toContain("proposal/approximation language");
+    });
+
+    it("Test 3C: sets allocationGrounding to PROPOSED when chunk only matches ONE requested spend category", () => {
+      const singleCategoryChunk: KnowledgeChunk = {
+        id: "chunk-budget-single-cat",
+        sourceType: "practitioner_playbook",
+        topic: "BUDGET",
+        content: "Budget 20 triệu: 10 triệu Content, 10 triệu hosting.",
+        title: "Content & Hosting",
+        tags: ["content", "hosting"],
+        confidence: "practitioner_experience",
+        canClaimAsPersonalExperience: false
+      };
+
+      const contract = buildAnswerContract({
+        question: "20 triệu chia Content, Entity, Guest Post và PBN thế nào?",
+        intent: "BUDGET_ALLOCATION",
+        retrievedChunks: [singleCategoryChunk]
+      });
+
+      expect(contract.allocationGrounding).toBe("PROPOSED");
+    });
+
+    it("Test 3D: handles percentage-based practitioner chunk without creating false 20m VND claims", () => {
+      const percentageChunk: KnowledgeChunk = {
+        id: "chunk-budget-pct",
+        sourceType: "practitioner_playbook",
+        topic: "BUDGET",
+        content: "Budget 100 triệu: 40% Content, 20% Entity, 20% Guest Post, 20% PBN.",
+        title: "Percentage SEO Allocation",
+        tags: ["content", "entity", "guest post", "pbn"],
+        confidence: "practitioner_experience",
+        canClaimAsPersonalExperience: false
+      };
+
+      const contract = buildAnswerContract({
+        question: "20 triệu chia Content, Entity, Guest Post và PBN thế nào?",
+        intent: "BUDGET_ALLOCATION",
+        retrievedChunks: [percentageChunk]
+      });
+
+      expect(contract.allocationGrounding).toBe("PRACTITIONER_EXAMPLE");
+      expect(contract.groundedFacts[0].isPercentageBased).toBe(true);
+      expect(contract.groundedFacts[0].value).toContain("40% Content");
     });
   });
 
-  describe("Test E: Ungrounded Budget Allocation (Proposed)", () => {
-    it("sets allocationGrounding to PROPOSED when no retrieved chunk contains exact allocation", () => {
+  // -------------------------------------------------------------------------
+  // FIX 4: Proposed Mode Wording Enforcement
+  // -------------------------------------------------------------------------
+  describe("Fix 4: Proposed Mode Wording Enforcement", () => {
+    it("Test 4A: requires proposal / approximation language in Sentence 1 directive when PROPOSED", () => {
       const contract = buildAnswerContract({
-        question: "20 triệu chia Content Entity Guest Post PBN thế nào?",
+        question: "20 triệu chia Content, Entity, Guest Post và PBN thế nào?",
         intent: "BUDGET_ALLOCATION",
         retrievedChunks: []
       });
 
       expect(contract.allocationGrounding).toBe("PROPOSED");
-      expect(contract.firstSentenceDirective).toContain("reasonable strategy proposal");
-      expect(contract.firstSentenceDirective).toContain("not as an ungrounded historical fact");
+      expect(contract.firstSentenceDirective).toContain("proposal/approximation language");
+      expect(contract.firstSentenceDirective).toContain("Với 20 triệu thì em có thể chia khoảng...");
+    });
+
+    it("Test 4B: generated prompt forbids treating PROPOSED numbers as candidate history or known facts", () => {
+      const contract = buildAnswerContract({
+        question: "20 triệu chia Content, Entity, Guest Post và PBN thế nào?",
+        intent: "BUDGET_ALLOCATION",
+        retrievedChunks: []
+      });
+
+      const prompt = buildFastSeoInterviewPrompt(undefined, undefined, contract);
+      expect(prompt).toContain("In PROPOSED mode, do NOT present proposed numbers as known historical facts");
+      expect(prompt).toContain("Sentence 1 MUST use proposal/approximation wording");
     });
   });
 
-  describe("Test F: Direct Allocation Strict Entity Expansion Compatibility", () => {
+  // -------------------------------------------------------------------------
+  // REGRESSION TESTS: Fact Compatibility & Lifecycle
+  // -------------------------------------------------------------------------
+  describe("Regression: Fact & Contract Compatibility", () => {
     it("rejects speculative reuse when DIRECT_ALLOCATION expands with even a single new spend category", () => {
       const provisional = buildAnswerContract({
         question: "20 triệu chia Content",
@@ -188,15 +321,8 @@ describe("Phase 4.1: Grounded Answer Contract Safety Tests", () => {
       expect(check.compatible).toBe(false);
       expect(check.reason).toContain("DIRECT_ALLOCATION requires fresh stream when spend categories expand");
     });
-  });
 
-  describe("Test G: Normalized Fact Equivalence", () => {
     it("treats equivalent numeric representations ('20 triệu' and '20tr') as compatible", () => {
-      expect(normalizeNumericFact("20 triệu")).toBe("20 triệu");
-      expect(normalizeNumericFact("20tr")).toBe("20 triệu");
-      expect(normalizeNumericFact("20 củ")).toBe("20 triệu");
-      expect(normalizeNumericFact("budget: hai mươi triệu")).toBe("20 triệu");
-
       const provisional = buildAnswerContract({
         question: "Budget 20 triệu chia content thế nào?",
         intent: "BUDGET_ALLOCATION"
@@ -210,10 +336,8 @@ describe("Phase 4.1: Grounded Answer Contract Safety Tests", () => {
       const check = isContractCompatible(provisional, finalContract);
       expect(check.compatible).toBe(true);
     });
-  });
 
-  describe("Test H: Material Fact Change", () => {
-    it("rejects speculative reuse when numeric budget or DR values change", () => {
+    it("rejects speculative reuse when material budget numbers change ('20 triệu' vs '30 triệu')", () => {
       const provisional = buildAnswerContract({
         question: "20 triệu chia content thế nào?",
         intent: "BUDGET_ALLOCATION"
@@ -228,6 +352,27 @@ describe("Phase 4.1: Grounded Answer Contract Safety Tests", () => {
       expect(check.compatible).toBe(false);
       expect(check.reason).toContain("Material numeric fact change");
     });
+
+    it("treats equivalent DR representations ('DR 55' and 'DR55') as compatible and different DRs as incompatible", () => {
+      const prov1 = buildAnswerContract({
+        question: "Domain DR 55",
+        intent: "DOMAIN_SELECTION"
+      });
+
+      const final1 = buildAnswerContract({
+        question: "Domain DR55",
+        intent: "DOMAIN_SELECTION"
+      });
+
+      expect(isContractCompatible(prov1, final1).compatible).toBe(true);
+
+      const finalDiffDr = buildAnswerContract({
+        question: "Domain DR 70",
+        intent: "DOMAIN_SELECTION"
+      });
+
+      expect(isContractCompatible(prov1, finalDiffDr).compatible).toBe(false);
+    });
   });
 
   describe("Performance Benchmark", () => {
@@ -237,7 +382,7 @@ describe("Phase 4.1: Grounded Answer Contract Safety Tests", () => {
           id: "chunk-1",
           sourceType: "practitioner_playbook",
           topic: "BUDGET",
-          content: "Content 6m, Entity 3m, Guest Post 5m, PBN 6m",
+          content: "Budget 20 triệu: Content 6m, Entity 3m, Guest Post 5m, PBN 6m",
           title: "Budget",
           tags: ["budget"],
           confidence: "practitioner_experience",

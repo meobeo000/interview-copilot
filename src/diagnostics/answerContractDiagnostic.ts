@@ -1,97 +1,142 @@
-import { buildAnswerContract, formatContractForPrompt, isContractCompatible } from "../llm/answerContract";
-import { SemanticEvidenceAccumulator } from "../question-detector/semanticEvidence";
+import {
+  buildAnswerContract,
+  formatContractForPrompt,
+  isContractCompatible,
+  normalizeRequiredFact
+} from "../llm/answerContract";
 import { DEFAULT_CANDIDATE_PROFILE } from "../shared/candidateProfile";
 import type { KnowledgeChunk } from "../knowledge/types";
+import type { CandidateProfile } from "../shared/candidateProfile";
 
 async function runAnswerContractDiagnostic() {
-  console.log("\n[PHASE 4.1: GROUNDED ANSWER CONTRACT & SAFETY DIAGNOSTIC]");
+  console.log("\n[PHASE 4.1.1: GROUNDING CORRECTNESS DIAGNOSTIC]");
   console.log("============================================================");
 
-  const samplePractitionerChunks: KnowledgeChunk[] = [
-    {
-      id: "chunk-playbook-20m",
-      sourceType: "practitioner_playbook",
-      topic: "BUDGET",
-      content: "Với ngân sách 20 triệu: Content 6 triệu, Entity và backlink nền 3 triệu, Guest Post 5 triệu, PBN 6 triệu.",
-      title: "Playbook 20M Budget",
-      tags: ["20 triệu", "content", "entity", "guest post", "pbn"],
-      confidence: "practitioner_experience",
-      canClaimAsPersonalExperience: false
-    }
-  ];
+  // -------------------------------------------------------------------------
+  // CASE A: DR NORMALIZATION
+  // -------------------------------------------------------------------------
+  console.log("\n------------------------------------------------------------");
+  console.log("CASE A — DR NORMALIZATION");
+  const rawDrFact = "DR: DR 55, DR 20";
+  const normalizedDr = normalizeRequiredFact(rawDrFact);
+  console.log(`Input: "${rawDrFact}"`);
+  console.log(`Normalized Canonical Fact: "${normalizedDr}"`);
+  console.log(`Money Conversion Occurred: ${normalizedDr.includes("triệu") || normalizedDr.includes("vnd") ? "YES (BUG!)" : "NO (CORRECT)"}`);
 
-  const testCases = [
-    {
-      id: "1. 20M BUDGET ALLOCATION (GROUNDED IN PRACTITIONER PLAYBOOK)",
-      rawSpeech: "bớt chết ban đầu khoảng hai mươi triệu thì em phân bổ content entity guest post và pbn thế nào?",
-      normalizedQuestion: "Budget ban đầu khoảng hai mươi triệu thì em sẽ phân bổ content, Entity, Guest Post và PBN như thế nào?",
-      intent: "BUDGET_ALLOCATION",
-      retrievedChunks: samplePractitionerChunks
-    },
-    {
-      id: "2. 20M BUDGET ALLOCATION (PROPOSED / UNGROUNDED NO EXACT CHUNK)",
-      rawSpeech: "ngân sách hai mươi triệu chia content entity pbn thế nào?",
-      normalizedQuestion: "Ngân sách 20 triệu chia Content, Entity và PBN thế nào?",
-      intent: "BUDGET_ALLOCATION",
-      retrievedChunks: []
-    },
-    {
-      id: "3. DR55 VS DR20 DOMAIN SELECTION",
-      rawSpeech: "domain a dr năm mươi lăm traffic bằng không domain b dr hai mươi có traffic thật em chọn con nào?",
-      normalizedQuestion: "Domain A DR 55 traffic bằng 0, domain B DR 20 nhưng có traffic thật và backlink đúng niche, em chọn con nào?",
-      intent: "DOMAIN_SELECTION",
-      retrievedChunks: []
-    },
-    {
-      id: "4. PBN DAY 10 TIMING (CANDIDATE SAFETY CHECK)",
-      rawSpeech: "tại sao ngày thứ mười em mới bắt đầu đi pbn?",
-      normalizedQuestion: "Tại sao ngày thứ 10 em mới bắt đầu đi PBN cho site mới?",
-      intent: "PBN_TIMING",
-      retrievedChunks: []
-    }
-  ];
+  // -------------------------------------------------------------------------
+  // CASE B: SKILL WITHOUT HANDS-ON EXPERIENCE
+  // -------------------------------------------------------------------------
+  console.log("\n------------------------------------------------------------");
+  console.log("CASE B — SKILL WITHOUT HANDS-ON EXPERIENCE");
+  const skillOnlyProfile: CandidateProfile = {
+    fullName: "Nguyen Van Skill",
+    role: "SEO Specialist",
+    background: "React Web Dev",
+    skills: ["React"],
+    seoSkills: ["PBN", "Technical SEO"],
+    tools: ["GSC"],
+    markets: ["VN"],
+    strengths: ["Speed"],
+    experienceNotes: "Built ecommerce UI.",
+    projects: [
+      {
+        name: "Ecommerce Store",
+        role: "Developer",
+        description: "Built online store frontend."
+      }
+    ]
+  };
 
-  for (const tc of testCases) {
-    console.log(`\n------------------------------------------------------------`);
-    console.log(`CASE: ${tc.id}`);
-    console.log(`Raw Speech: "${tc.rawSpeech}"`);
-    console.log(`Normalized Question: "${tc.normalizedQuestion}"`);
+  const contractSkillOnly = buildAnswerContract({
+    question: "Em đã đi PBN thế nào?",
+    intent: "PBN_TIMING",
+    candidateProfile: skillOnlyProfile
+  });
 
-    const accumulator = new SemanticEvidenceAccumulator();
-    accumulator.appendFinal(tc.rawSpeech);
-    const semanticEvidence = accumulator.getState();
+  console.log(`Question: "Em đã đi PBN thế nào?"`);
+  console.log(`seoSkills: ["PBN"] (No PBN hands-on project)`);
+  console.log(`candidateExperienceAllowed: ${contractSkillOnly.candidateExperienceAllowed}`);
+  console.log(`evidenceType: ${contractSkillOnly.candidateExperience.evidenceType}`);
+  console.log(`reason: ${contractSkillOnly.candidateExperience.reason}`);
 
-    const contract = buildAnswerContract({
-      question: tc.normalizedQuestion,
-      intent: tc.intent,
-      semanticEvidence,
-      retrievedChunks: tc.retrievedChunks,
-      candidateProfile: DEFAULT_CANDIDATE_PROFILE
-    });
+  // -------------------------------------------------------------------------
+  // CASE C: INVALID BUDGET CHUNK (NON-SEO EXPENSES)
+  // -------------------------------------------------------------------------
+  console.log("\n------------------------------------------------------------");
+  console.log("CASE C — INVALID BUDGET CHUNK (NON-SEO EXPENSES)");
+  const nonSeoChunk: KnowledgeChunk = {
+    id: "chunk-non-seo",
+    sourceType: "practitioner_playbook",
+    topic: "BUDGET",
+    content: "Budget 20 triệu: 12 triệu hosting, 5 triệu development, 3 triệu tracking.",
+    title: "Server & Dev Spend",
+    tags: ["hosting", "dev", "tracking"],
+    confidence: "practitioner_experience",
+    canClaimAsPersonalExperience: false
+  };
 
-    console.log(`\n[ANSWER CONTRACT]`);
-    console.log(`intent: ${contract.intent}`);
-    console.log(`answerType: ${contract.answerType}`);
-    console.log(`candidateExperienceAllowed: ${contract.candidateExperienceAllowed}`);
-    console.log(`candidateExperienceTopics: ${JSON.stringify(contract.candidateExperience.supportedTopics)}`);
-    console.log(`candidateExperienceReason: ${contract.candidateExperience.reason}`);
-    console.log(`allocationGrounding: ${contract.allocationGrounding ?? "N/A"}`);
-    console.log(`groundedFactCount: ${contract.groundedFacts.length}`);
-    console.log(`groundedSourceTypes: ${JSON.stringify(Array.from(new Set(contract.groundedFacts.map((f) => f.sourceType))))}`);
-    console.log(`requiredFacts: ${JSON.stringify(contract.requiredFacts)}`);
-    console.log(`requiredEntities: ${JSON.stringify(contract.requiredEntities)}`);
-    console.log(`firstSentenceDirective: ${contract.firstSentenceDirective}`);
-    console.log(`maxWords: ${contract.maxWords}`);
-    console.log(`contractBuildMs: ${contract.contractBuildMs} ms`);
+  const contractNonSeo = buildAnswerContract({
+    question: "Budget 20 triệu phân bổ Content, Entity, Guest Post và PBN thế nào?",
+    intent: "BUDGET_ALLOCATION",
+    retrievedChunks: [nonSeoChunk],
+    candidateProfile: DEFAULT_CANDIDATE_PROFILE
+  });
 
-    const contractSnippet = formatContractForPrompt(contract);
+  console.log(`Question: "Budget 20 triệu phân bổ Content, Entity, Guest Post và PBN thế nào?"`);
+  console.log(`Chunk Content: "${nonSeoChunk.content}"`);
+  console.log(`allocationGrounding: ${contractNonSeo.allocationGrounding}`);
+  console.log(`firstSentenceDirective: ${contractNonSeo.firstSentenceDirective}`);
 
-    console.log(`\n[GENERATED CONTRACT PROMPT FRAGMENT]:`);
-    console.log(contractSnippet);
-  }
+  // -------------------------------------------------------------------------
+  // CASE D: VALID PRACTITIONER ALLOCATION CHUNK
+  // -------------------------------------------------------------------------
+  console.log("\n------------------------------------------------------------");
+  console.log("CASE D — VALID PRACTITIONER ALLOCATION CHUNK");
+  const validPlaybookChunk: KnowledgeChunk = {
+    id: "chunk-valid-playbook",
+    sourceType: "practitioner_playbook",
+    topic: "BUDGET",
+    content: "Budget 20 triệu: 6 triệu Content, 3 triệu Entity, 5 triệu Guest Post, 6 triệu PBN.",
+    title: "20M SEO Allocation",
+    tags: ["20 triệu", "content", "entity", "guest post", "pbn"],
+    confidence: "practitioner_experience",
+    canClaimAsPersonalExperience: false
+  };
 
-  console.log(`\n------------------------------------------------------------`);
-  console.log(`[SPECULATIVE COMPATIBILITY VALIDATION]`);
+  const contractValidPlaybook = buildAnswerContract({
+    question: "Budget 20 triệu phân bổ Content, Entity, Guest Post và PBN thế nào?",
+    intent: "BUDGET_ALLOCATION",
+    retrievedChunks: [validPlaybookChunk],
+    candidateProfile: DEFAULT_CANDIDATE_PROFILE
+  });
+
+  console.log(`Question: "Budget 20 triệu phân bổ Content, Entity, Guest Post và PBN thế nào?"`);
+  console.log(`Chunk Content: "${validPlaybookChunk.content}"`);
+  console.log(`allocationGrounding: ${contractValidPlaybook.allocationGrounding}`);
+  console.log(`groundedFactCount: ${contractValidPlaybook.groundedFacts.length}`);
+  console.log(`groundedFacts: ${JSON.stringify(contractValidPlaybook.groundedFacts.map((f) => f.value))}`);
+
+  // -------------------------------------------------------------------------
+  // CASE E: PROPOSED PROMPT DIRECTIVES
+  // -------------------------------------------------------------------------
+  console.log("\n------------------------------------------------------------");
+  console.log("CASE E — PROPOSED PROMPT DIRECTIVES");
+  const contractProposed = buildAnswerContract({
+    question: "Budget 20 triệu phân bổ Content, Entity, Guest Post và PBN thế nào?",
+    intent: "BUDGET_ALLOCATION",
+    retrievedChunks: [],
+    candidateProfile: DEFAULT_CANDIDATE_PROFILE
+  });
+
+  const promptSnippet = formatContractForPrompt(contractProposed);
+  console.log(`[GENERATED PROMPT SNIPPET IN PROPOSED MODE]:\n`);
+  console.log(promptSnippet);
+
+  // -------------------------------------------------------------------------
+  // SPECULATIVE COMPATIBILITY VALIDATION
+  // -------------------------------------------------------------------------
+  console.log("\n------------------------------------------------------------");
+  console.log("[SPECULATIVE COMPATIBILITY VALIDATION]");
   const provContract = buildAnswerContract({
     question: "20 triệu chia Content",
     intent: "BUDGET_ALLOCATION"
@@ -111,7 +156,7 @@ async function runAnswerContractDiagnostic() {
   console.log(`2. Equivalent Numeric Fact ("20 triệu" vs "20tr"): compatible = ${isContractCompatible(provContract, finalEquivalentFact).compatible}`);
 
   console.log("\n============================================================");
-  console.log("[DIAGNOSTIC COMPLETED - ALL PHASE 4.1 CHECKS PASSED]");
+  console.log("[DIAGNOSTIC COMPLETED - ALL PHASE 4.1.1 CHECKS PASSED]");
   console.log("============================================================\n");
 }
 
