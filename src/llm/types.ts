@@ -1,4 +1,7 @@
 import type { ConversationItem, SuggestedAnswer } from "../shared/types";
+import type { CandidateProfile } from "../shared/candidateProfile";
+import type { QuestionIntent } from "../question-detector/intentClassifier";
+import type { KnowledgeChunk } from "../knowledge/types";
 
 export type AnswerDelta =
   | { type: "chunk"; accumulatedText: string }
@@ -16,7 +19,10 @@ export interface AnswerRequest {
   speechLastActivityAt?: number;
   questionIntentReadyAt?: number;
   recentHistory?: ConversationItem[];
-  profile?: import("../shared/candidateProfile").CandidateProfile;
+  profile?: CandidateProfile;
+  intent?: QuestionIntent | string;
+  retrievedChunks?: KnowledgeChunk[];
+  knowledgeContext?: string;
   signal?: AbortSignal;
 }
 

@@ -4,6 +4,8 @@ import { calculatePipelineMetrics, extractFirstUsefulAnswer, formatPipelineMetri
 import { buildFastSeoInterviewPrompt } from "./prompts/fastSeoInterviewPrompt";
 import { parseStreamingAnswer } from "./parseAnswerJson";
 import { AnswerTraceLogger } from "../shared/answerTrace";
+import { getKnowledgeRetriever } from "../knowledge/knowledgeRetriever";
+import { buildAnswerKnowledgeContext } from "../knowledge/answerKnowledgeContextBuilder";
 
 export interface GeminiAnswerConfig {
   apiKey: string;
@@ -46,10 +48,28 @@ export class GeminiAnswerService implements AnswerService {
     let firstUsefulAnswerAt: number | undefined;
     let answerCompletedAt: number | undefined;
 
+    // Grounded Knowledge Retrieval (< 5ms local in-memory operation)
+    const retrievalStart = Date.now();
+    const retrieved = request.retrievedChunks
+      ? { chunks: request.retrievedChunks, retrievalElapsedMs: 0 }
+      : getKnowledgeRetriever().retrieve(request.question, request.intent);
+    const retrievalElapsedMs = Math.max(0, Date.now() - retrievalStart);
+
+    const contextBuildStart = Date.now();
+    const knowledgeContext =
+      request.knowledgeContext ||
+      buildAnswerKnowledgeContext({
+        question: request.question,
+        intent: request.intent,
+        candidateProfile: request.profile,
+        retrievedChunks: retrieved.chunks
+      });
+    const contextBuildElapsedMs = Math.max(0, Date.now() - contextBuildStart);
+
     // Fast streaming prompt removes JSON syntax overhead so token 1 is readable Vietnamese text
     const payload = {
       system_instruction: {
-        parts: [{ text: buildFastSeoInterviewPrompt(request.profile) }]
+        parts: [{ text: buildFastSeoInterviewPrompt(request.profile, knowledgeContext) }]
       },
       contents: [
         {
@@ -68,7 +88,15 @@ export class GeminiAnswerService implements AnswerService {
     AnswerTraceLogger.record(request.questionId, {
       requestSent: Date.now(),
       provider: "gemini",
-      model: this.modelName
+      model: this.modelName,
+      knowledge: {
+        intent: typeof request.intent === "string" ? request.intent : request.intent?.category,
+        selectedChunks: retrieved.chunks.map((c) => c.id),
+        sourceTypes: Array.from(new Set(retrieved.chunks.map((c) => c.sourceType))),
+        topics: Array.from(new Set(retrieved.chunks.map((c) => c.topic))),
+        retrievalMs: retrievalElapsedMs,
+        contextBuildMs: contextBuildElapsedMs
+      }
     });
 
     let response: Response;

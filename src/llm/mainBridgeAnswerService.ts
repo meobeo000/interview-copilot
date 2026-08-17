@@ -5,7 +5,7 @@ import { AnswerTraceLogger } from "../shared/answerTrace";
 type GlobalWindow = {
   copilotWindow?: {
     answer?: {
-      generateAnswer: (req: { questionId: string; question: string; rawTranscript: string }) => Promise<void>;
+      generateAnswer: (req: { questionId: string; question: string; rawTranscript: string; profile?: unknown; intent?: unknown }) => Promise<void>;
       cancelAnswer: (questionId?: string) => Promise<void>;
       onChunk: (cb: (payload: { questionId: string; accumulatedText: string }) => void) => () => void;
       onComplete: (cb: (payload: { questionId: string; answer: unknown }) => void) => () => void;
@@ -95,7 +95,9 @@ export class MainBridgeAnswerService implements AnswerService {
       void answerApi.generateAnswer({
         questionId: request.questionId,
         question: request.question,
-        rawTranscript: request.rawTranscript
+        rawTranscript: request.rawTranscript,
+        profile: request.profile,
+        intent: request.intent
       });
 
       let isDone = false;

@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld("copilotWindow", {
     }
   },
   answer: {
-    generateAnswer: (request: { questionId: string; question: string; rawTranscript: string }) =>
+    generateAnswer: (request: { questionId: string; question: string; rawTranscript: string; profile?: unknown; intent?: unknown }) =>
       ipcRenderer.invoke("answer:generate", request),
     cancelAnswer: (questionId?: string) => ipcRenderer.invoke("answer:cancel", questionId),
     onChunk: (callback: (payload: { questionId: string; accumulatedText: string }) => void) => {

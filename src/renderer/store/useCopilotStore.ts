@@ -330,6 +330,7 @@ function startSpeculativeStream(
         questionIntentReadyAt: timestamps.questionIntentReadyAt,
         recentHistory: get().history.slice(0, 5),
         profile: get().candidateProfile,
+        intent: candidateEvent.intent,
         signal: abortController.signal
       });
 
@@ -587,7 +588,8 @@ async function streamAnswerForItem(
       speechLastActivityAt: item.timestamps?.speechLastActivityAt,
       questionIntentReadyAt: item.timestamps?.questionIntentReadyAt,
       recentHistory: get().history.slice(0, 5),
-      profile: get().candidateProfile
+      profile: get().candidateProfile,
+      intent: item.intent
     });
 
     for await (const delta of generator) {
