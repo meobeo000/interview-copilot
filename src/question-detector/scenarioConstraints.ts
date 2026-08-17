@@ -58,33 +58,46 @@ export function extractScenarioConstraints(text: string): ScenarioConstraints {
   }
 
   // 2. Referring Domain / Backlink Loss Constraints
-  const backlinkLossKeywords = ["referring domain", "backlink", "link"];
-  if (backlinkLossKeywords.some((kw) => norm.includes(kw))) {
-    const negLoss =
-      isConceptNegated(norm, ["referring domain không", "referring domain vẫn", "backlink không", "link không"]) ||
-      hasUnicodePhrase(norm, "referring domain không thay đổi") ||
-      hasUnicodePhrase(norm, "referring domain không mất") ||
-      hasUnicodePhrase(norm, "referring domain vẫn giữ") ||
-      hasUnicodePhrase(norm, "backlink không mất") ||
-      hasUnicodePhrase(norm, "link không mất");
+  const hasBacklinkLossNegative =
+    hasUnicodePhrase(norm, "referring domain không thay đổi") ||
+    hasUnicodePhrase(norm, "referring domain không mất") ||
+    hasUnicodePhrase(norm, "referring domain vẫn giữ") ||
+    hasUnicodePhrase(norm, "referring domain vẫn bình thường") ||
+    hasUnicodePhrase(norm, "referring domain vẫn ổn") ||
+    hasUnicodePhrase(norm, "backlink không mất") ||
+    hasUnicodePhrase(norm, "backlink không thay đổi") ||
+    hasUnicodePhrase(norm, "backlink vẫn bình thường") ||
+    hasUnicodePhrase(norm, "backlink vẫn ổn") ||
+    hasUnicodePhrase(norm, "link không mất") ||
+    hasUnicodePhrase(norm, "không mất backlink") ||
+    hasUnicodePhrase(norm, "không mất link") ||
+    isConceptNegated(norm, ["mất backlink", "tụt backlink", "mất referring domain", "mất link"]).isNegated;
 
-    if (negLoss) {
-      constraints.referringDomainLoss = false;
-      provenance.push({
-        key: "referringDomainLoss",
-        value: false,
-        sourceSnippet: "referring domain không mất / không thay đổi",
-        confidence: 0.95
-      });
-    } else if (hasUnicodePhrase(norm, "mất referring domain") || hasUnicodePhrase(norm, "tụt backlink") || hasUnicodePhrase(norm, "mất backlink")) {
-      constraints.referringDomainLoss = true;
-      provenance.push({
-        key: "referringDomainLoss",
-        value: true,
-        sourceSnippet: "mất backlink / referring domain",
-        confidence: 0.90
-      });
-    }
+  const hasBacklinkLossPositive =
+    hasUnicodePhrase(norm, "mất referring domain") ||
+    hasUnicodePhrase(norm, "tụt backlink") ||
+    hasUnicodePhrase(norm, "mất backlink") ||
+    hasUnicodePhrase(norm, "bị mất backlink") ||
+    hasUnicodePhrase(norm, "bị mất link") ||
+    hasUnicodePhrase(norm, "gãy link") ||
+    hasUnicodePhrase(norm, "mất link");
+
+  if (hasBacklinkLossNegative) {
+    constraints.referringDomainLoss = false;
+    provenance.push({
+      key: "referringDomainLoss",
+      value: false,
+      sourceSnippet: "referring domain không mất / không thay đổi",
+      confidence: 0.95
+    });
+  } else if (hasBacklinkLossPositive) {
+    constraints.referringDomainLoss = true;
+    provenance.push({
+      key: "referringDomainLoss",
+      value: true,
+      sourceSnippet: "mất backlink / referring domain",
+      confidence: 0.90
+    });
   }
 
   // 3. Manual Action Constraints

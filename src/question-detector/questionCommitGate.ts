@@ -111,6 +111,9 @@ export class QuestionCommitGate {
       "có được không",
       "phải không",
       "đúng không",
+      "ngay không",
+      "được không",
+      "hay không",
       "sao"
     ];
 
@@ -124,13 +127,16 @@ export class QuestionCommitGate {
       "em làm gì",
       "em chọn",
       "em ưu tiên",
-      "anh giao cho em"
+      "anh giao cho em",
+      "hướng xử lý"
     ];
 
-    const hasInterrogative = interrogativeMarkers.some((m) => hasUnicodePhrase(lower, m) || lower.includes(m));
+    const hasInterrogative =
+      interrogativeMarkers.some((m) => hasUnicodePhrase(lower, m) || lower.includes(m)) ||
+      Boolean(lower.match(/(?:^|\s)(ngay không|được không|phải không|đúng không|hay không|nhỉ|hả)(?:\s|$|[.,?!])/i));
     const hasActionRequest = actionRequestMarkers.some((m) => hasUnicodePhrase(lower, m) || lower.includes(m));
     const hasQuestionMark = text.endsWith("?");
-    const isConditionalQuestion = lower.includes("nếu") && lower.includes("thì");
+    const isConditionalQuestion = lower.includes("nếu") && lower.includes("thì") && (hasInterrogative || hasActionRequest || hasQuestionMark);
 
     // Check if transcript starts with a dangling prefix and has NO interrogative or action request
     const startsWithDangling = danglingPrefixes.some((p) => lower.startsWith(p));
@@ -162,7 +168,7 @@ export class QuestionCommitGate {
     }
 
     // 3. Complete Question Validation
-    if (hasInterrogative || hasActionRequest || hasQuestionMark || (isConditionalQuestion && lower.split(/\s+/).length >= 5)) {
+    if (hasInterrogative || hasActionRequest || hasQuestionMark || isConditionalQuestion) {
       return {
         decision: "COMMIT",
         isCompleteQuestion: true,
@@ -171,18 +177,7 @@ export class QuestionCommitGate {
       };
     }
 
-    // 4. Default: If text is long enough and has complete clause structure, commit; otherwise hold fragment
-    const wordCount = text.split(/\s+/).length;
-    if (wordCount >= 10 && (lower.includes("thì") || lower.includes("sau đó") || lower.includes("để"))) {
-      return {
-        decision: "COMMIT",
-        isCompleteQuestion: true,
-        reason: "Long conversational clause with structural predicate.",
-        confidence: 0.85
-      };
-    }
-
-    // Incomplete short fragment fallback
+    // Incomplete fragment fallback: Declarative statements without question predicates are held
     return {
       decision: "HOLD_FRAGMENT",
       isCompleteQuestion: false,

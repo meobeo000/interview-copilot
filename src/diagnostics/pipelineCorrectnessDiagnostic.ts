@@ -30,7 +30,10 @@ export async function runPipelineCorrectnessDiagnostic(): Promise<void> {
   detector.triggerSpeechFinal(fullMerged, (cand) => {
     committedCandidate = cand;
   });
-  const fragContinuationPass = holdPass && committedCandidate !== null && committedCandidate.text === fullMerged;
+  const fragContinuationPass =
+    holdPass &&
+    committedCandidate !== null &&
+    (committedCandidate as QuestionCandidate).text === fullMerged;
   console.log(`Fragment continuation:\n${fragContinuationPass ? "PASS" : "FAIL"}\n`);
 
   // 3. Short question recognition

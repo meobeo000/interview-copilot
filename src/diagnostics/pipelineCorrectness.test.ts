@@ -34,8 +34,9 @@ describe("Phase 6.0: Real Interview Pipeline Correctness", () => {
     });
 
     expect(committedCandidate).not.toBeNull();
-    expect(committedCandidate.text).toBe(fullMerged);
-    expect(committedCandidate.isComplete).toBe(true);
+    const cand = committedCandidate as QuestionCandidate | null;
+    expect(cand?.text).toBe(fullMerged);
+    expect(cand?.isComplete).toBe(true);
   });
 
   // C. Short question recognition
@@ -84,11 +85,48 @@ describe("Phase 6.0: Real Interview Pipeline Correctness", () => {
     expect(constraints.coreUpdateOccurred).toBe(true);
   });
 
-  // G. Referring domain intact
-  it("G: 'backlink không mất' and 'referring domain không thay đổi' extracts referringDomainLoss = false", () => {
-    const text = "Referring domain không thay đổi và backlink không mất";
-    const constraints = extractScenarioConstraints(text);
-    expect(constraints.referringDomainLoss).toBe(false);
+  // G. Referring domain / backlink regressions
+  it("G: evaluates referringDomainLoss correctly across positive, negative, and neutral statements", () => {
+    // A. Neutral statement with change
+    const textA = "Site tụt traffic và backlink profile có thay đổi";
+    const constraintsA = extractScenarioConstraints(textA);
+    expect(constraintsA.referringDomainLoss).toBeUndefined();
+
+    // B. Explicit negative statement
+    const textB = "Referring domain không thay đổi";
+    const constraintsB = extractScenarioConstraints(textB);
+    expect(constraintsB.referringDomainLoss).toBe(false);
+
+    // C. Explicit positive backlink loss
+    const textC = "Site bị mất backlink";
+    const constraintsC = extractScenarioConstraints(textC);
+    expect(constraintsC.referringDomainLoss).toBe(true);
+
+    // D. Backlink increase (neutral for loss)
+    const textD = "Backlink tăng mạnh";
+    const constraintsD = extractScenarioConstraints(textD);
+    expect(constraintsD.referringDomainLoss).toBeUndefined();
+  });
+
+  // G2. QuestionCommitGate tightened long-clause fallback regressions
+  it("G2: holds long declarative statements as fragments unless they contain question/request signals", () => {
+    // Declarative statement without question predicate -> HOLD_FRAGMENT
+    const declText = "Em tối ưu content để site có tín hiệu rồi sau đó tăng link";
+    const declGate = QuestionCommitGate.evaluate(declText);
+    expect(declGate.decision).toBe("HOLD_FRAGMENT");
+    expect(declGate.isCompleteQuestion).toBe(false);
+
+    // Same statement ending with question request -> COMMIT
+    const qText = "Em tối ưu content để site có tín hiệu rồi sau đó em làm gì?";
+    const qGate = QuestionCommitGate.evaluate(qText);
+    expect(qGate.decision).toBe("COMMIT");
+    expect(qGate.isCompleteQuestion).toBe(true);
+
+    // Conditional question ending with question particle -> COMMIT
+    const condQText = "Nếu site có impression rồi thì em tăng PBN ngay không?";
+    const condQGate = QuestionCommitGate.evaluate(condQText);
+    expect(condQGate.decision).toBe("COMMIT");
+    expect(condQGate.isCompleteQuestion).toBe(true);
   });
 
   // H. Numeric percentage traffic drop
