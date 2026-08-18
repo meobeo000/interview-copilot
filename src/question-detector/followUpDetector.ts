@@ -9,10 +9,73 @@ import type { SuggestedAnswer } from "../shared/types";
 import type { AnswerContract } from "../llm/answerContract";
 import type { QuestionIntentCategory } from "./intentClassifier";
 
+const KNOWN_SEO_ENTITIES: Record<string, string> = {
+  pbn: "PBN",
+  "site vệ tinh": "PBN",
+  "vệ tinh": "PBN",
+  "guest post": "Guest Post",
+  guestpost: "Guest Post",
+  entity: "Entity",
+  "internal link": "internal link",
+  "internal links": "internal link",
+  silo: "internal link",
+  "topic cluster": "internal link",
+  content: "content",
+  "bài viết": "content",
+  backlink: "backlink",
+  "link nền": "backlink",
+  textlink: "backlink",
+  "link bẩn": "negative SEO",
+  "link spam": "negative SEO",
+  "spam backlink": "negative SEO",
+  "negative seo": "negative SEO",
+  disavow: "negative SEO",
+  gsc: "GSC",
+  "google search console": "GSC",
+  "search console": "GSC",
+  ga4: "GA4",
+  "google analytics": "GA4",
+  analytics: "GA4",
+  ahrefs: "Ahrefs",
+  "core update": "Core Update",
+  canonical: "canonical",
+  "crawl budget": "crawl budget",
+  crawl: "crawl budget",
+  crawling: "crawl budget",
+  "search intent": "Search Intent",
+  "user intent": "Search Intent",
+  intent: "Search Intent",
+  "referring domain": "referring domain",
+  "referring domains": "referring domain",
+  indexing: "indexing",
+  index: "indexing",
+  "301": "301",
+  "redirect 301": "301",
+  redirect: "301",
+  "money page": "money page",
+  "money site": "money site",
+  "expired domain": "expired domain",
+  "domain cũ": "expired domain",
+  "tên miền cũ": "expired domain",
+  "anchor text": "anchor text",
+  anchor: "anchor text",
+  sitemap: "sitemap",
+  "robots.txt": "robots.txt",
+  schema: "schema",
+  "on-page": "on-page",
+  onpage: "on-page",
+  "off-page": "off-page",
+  offpage: "off-page",
+  "technical seo": "technical SEO"
+};
+
 /**
  * Deterministically detects if an interviewer utterance is a short follow-up question.
  */
-export function detectFollowUp(utterance: string): FollowUpDetectionResult {
+export function detectFollowUp(
+  utterance: string,
+  previousContext?: InterviewTurnContext | null
+): FollowUpDetectionResult {
   const text = normalizeSemanticText(utterance).trim();
   const lower = text.toLowerCase().replace(/[?!.,]+$/, "").trim();
 
@@ -135,30 +198,60 @@ export function detectFollowUp(utterance: string): FollowUpDetectionResult {
     };
   }
 
-  // 6. ENTITY_CONTINUATION (e.g. "Còn PBN?", "Còn Guest Post?", "Thế còn Entity?", "Còn internal link?")
-  const entityContinuationMatch = lower.match(
-    /^(?:còn|thế còn|vậy còn)\s+(pbn|guest post|entity|internal link|content|backlink|anchor text|textlink|link bẩn|gsc|ga4|ahrefs)(?:\s+thì sao|\s+như thế nào|\s+sao)?$/i
+  // 6. ENTITY_CONTINUATION (e.g. "Còn PBN?", "Còn canonical?", "Thế còn Core Update?", "Vậy còn 301?", "Còn money page thì sao?")
+  const entityMatch = lower.match(
+    /^(?:còn|thế còn|vậy còn)\s+(.+?)(?:\s+thì sao|\s+như thế nào|\s+sao)?$/i
   );
-  if (entityContinuationMatch) {
-    const rawEnt = entityContinuationMatch[1].toLowerCase();
-    let normalizedEnt = rawEnt;
-    if (rawEnt === "pbn") normalizedEnt = "PBN";
-    else if (rawEnt === "guest post") normalizedEnt = "Guest Post";
-    else if (rawEnt === "entity") normalizedEnt = "Entity";
-    else if (rawEnt === "internal link") normalizedEnt = "internal link";
-    else if (rawEnt === "content") normalizedEnt = "content";
-    else if (rawEnt === "backlink") normalizedEnt = "backlink";
-    else if (rawEnt === "anchor text") normalizedEnt = "anchor text";
-    else if (rawEnt === "gsc") normalizedEnt = "GSC";
-    else if (rawEnt === "ga4") normalizedEnt = "GA4";
-    else if (rawEnt === "ahrefs") normalizedEnt = "Ahrefs";
+  if (entityMatch) {
+    const rawCandidate = entityMatch[1].trim().toLowerCase();
 
-    return {
-      detected: true,
-      type: "ENTITY_CONTINUATION",
-      targetEntity: normalizedEnt,
-      rawPattern: entityContinuationMatch[0]
-    };
+    // Condition 1: Recognized SEO vocabulary (e.g. "301", "pbn", "canonical", "internal link")
+    if (KNOWN_SEO_ENTITIES[rawCandidate]) {
+      return {
+        detected: true,
+        type: "ENTITY_CONTINUATION",
+        targetEntity: KNOWN_SEO_ENTITIES[rawCandidate],
+        rawPattern: entityMatch[0]
+      };
+    }
+
+    // Reject numbers / budgets / units (e.g. "20 triệu", "50k", "5%")
+    const isNumberOrMoney = Boolean(
+      rawCandidate.match(/^\d+/) ||
+      rawCandidate.includes("triệu") ||
+      rawCandidate.includes("nghìn") ||
+      rawCandidate.includes("tỷ") ||
+      rawCandidate.match(/\b\d+\s*k\b/i) ||
+      rawCandidate.includes("%")
+    );
+
+    // Reject non-SEO conversational pronouns and temporal words unless in previousContext
+    const conversationalStops = ["anh", "em", "ngày mai", "bây giờ", "hôm nay", "cà phê", "cơm", "đó", "nó", "đây", "ai", "sao", "thế"];
+    const isStopWord = conversationalStops.includes(rawCandidate);
+
+    // Condition 2: Appeared as an entity/concept in previous completed turn
+    if (!isNumberOrMoney && !isStopWord && previousContext) {
+      const prevEntities = previousContext.entities || [];
+      const matchedPrevEntity = prevEntities.find(
+        (e) => e.toLowerCase() === rawCandidate || e.toLowerCase().includes(rawCandidate)
+      );
+      if (matchedPrevEntity) {
+        return {
+          detected: true,
+          type: "ENTITY_CONTINUATION",
+          targetEntity: matchedPrevEntity,
+          rawPattern: entityMatch[0]
+        };
+      }
+      if (previousContext.question && previousContext.question.toLowerCase().includes(rawCandidate)) {
+        return {
+          detected: true,
+          type: "ENTITY_CONTINUATION",
+          targetEntity: rawCandidate,
+          rawPattern: entityMatch[0]
+        };
+      }
+    }
   }
 
   // 7. GENERAL_CONTINUATION (e.g. "Rồi sao nữa?", "Sau đó thì sao?", "Rồi làm gì?")
@@ -192,7 +285,7 @@ export function resolveFollowUpContext(
   currentTurnId?: string
 ): ResolvedFollowUpContext {
   const start = performance.now();
-  const detection = detectFollowUp(currentUtterance);
+  const detection = detectFollowUp(currentUtterance, previousContext);
 
   if (!detection.detected || !detection.type) {
     const resolutionMs = Math.round((performance.now() - start) * 100) / 100;
@@ -303,27 +396,60 @@ export function extractDecisionFromCompletedTurn(
   answer: SuggestedAnswer,
   contract?: AnswerContract
 ): InterviewTurnDecision | undefined {
-  const qLower = question.toLowerCase();
   const opening = (answer.openingLine || "").trim();
   const openingLower = opening.toLowerCase();
 
   if (intent === "DOMAIN_SELECTION") {
-    if (openingLower.includes("domain b") || openingLower.includes("con b") || openingLower.includes("site b") || qLower.includes("domain b")) {
-      return {
-        choice: "domain B",
-        action: "Em chọn domain B."
-      };
-    }
-    if (openingLower.includes("domain a") || openingLower.includes("con a") || openingLower.includes("site a")) {
+    // Only extract choice if answer text clearly states a choice
+    const answerText = [answer.openingLine, ...(answer.bullets || []), ...(answer.keywords || []), answer.streamingText]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    const choosesA =
+      answerText.includes("chọn domain a") ||
+      answerText.includes("lấy con a") ||
+      answerText.includes("chọn con a") ||
+      answerText.includes("ưu tiên domain a") ||
+      answerText.includes("ưu tiên con a") ||
+      answerText.includes("nghiêng về domain a") ||
+      answerText.includes("nghiêng về con a") ||
+      answerText.includes("nghiêng về site a") ||
+      answerText.includes("lấy domain a") ||
+      answerText.includes("lấy site a");
+
+    const choosesB =
+      answerText.includes("chọn domain b") ||
+      answerText.includes("lấy con b") ||
+      answerText.includes("chọn con b") ||
+      answerText.includes("ưu tiên domain b") ||
+      answerText.includes("ưu tiên con b") ||
+      answerText.includes("nghiêng về domain b") ||
+      answerText.includes("nghiêng về con b") ||
+      answerText.includes("nghiêng về site b") ||
+      answerText.includes("lấy domain b") ||
+      answerText.includes("lấy site b");
+
+    if (choosesA && !choosesB) {
       return {
         choice: "domain A",
-        action: "Em chọn domain A."
+        action: opening || "Em chọn domain A."
       };
     }
-    return {
-      choice: "domain B",
-      action: opening || "Em chọn domain B (có traffic thật và backlink niche)."
-    };
+    if (choosesB && !choosesA) {
+      return {
+        choice: "domain B",
+        action: opening || "Em chọn domain B."
+      };
+    }
+
+    // If answer did NOT make a domain selection (e.g. diagnostic / Wayback check first), do NOT fabricate choice
+    if (opening) {
+      return {
+        action: opening
+      };
+    }
+    return undefined;
   }
 
   if (intent === "NEGATIVE_SEO") {

@@ -3,6 +3,7 @@ import type { QuestionIntent, QuestionIntentCategory } from "../question-detecto
 import type { SemanticEvidenceState } from "../question-detector/semanticEvidence";
 import type { KnowledgeChunk, KnowledgeSourceType } from "../knowledge/types";
 import { classifyQuestionShape } from "../question-detector/questionShapeClassifier";
+import { hasUnicodePhrase } from "../shared/semanticTextMatcher";
 
 export type AnswerContractType =
   | "DIRECT_ALLOCATION"
@@ -255,9 +256,13 @@ export function normalizeNumericFact(fact: string): string {
  */
 export function evaluateCandidateExperience(
   question: string,
-  _intentCategory: QuestionIntentCategory,
-  profile?: CandidateProfile
+  intentOrProfile?: QuestionIntentCategory | CandidateProfile,
+  maybeProfile?: CandidateProfile
 ): CandidateExperienceEvidence {
+  const profile = (intentOrProfile && typeof intentOrProfile === "object" && "fullName" in intentOrProfile)
+    ? (intentOrProfile as CandidateProfile)
+    : maybeProfile;
+
   if (!profile) {
     return {
       allowed: false,
@@ -282,10 +287,10 @@ export function evaluateCandidateExperience(
     "Core Update recovery": ["core update", "tụt traffic", "recovery", "thuật toán"]
   };
 
-  // Identify targeted topics
+  // Identify targeted topics using Unicode-safe token/phrase matching
   const targetedTopics: string[] = [];
   for (const [topic, triggers] of Object.entries(techniqueKeywords)) {
-    if (triggers.some((tr) => qLower.includes(tr))) {
+    if (triggers.some((tr) => hasUnicodePhrase(qLower, tr))) {
       targetedTopics.push(topic);
     }
   }
@@ -320,9 +325,9 @@ export function evaluateCandidateExperience(
   for (const topic of targetedTopics) {
     const triggers = techniqueKeywords[topic];
 
-    // Check project descriptions
+    // Check project descriptions with Unicode-safe phrase/token matching
     for (const p of projectCorpus) {
-      if (triggers.some((tr) => p.text.includes(tr))) {
+      if (triggers.some((tr) => hasUnicodePhrase(p.text, tr))) {
         supportedTopics.push(topic);
         supportingProjectIds.push(p.name);
         evidenceType = "PROJECT";
