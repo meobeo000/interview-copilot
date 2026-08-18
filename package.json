@@ -17,6 +17,7 @@
     "diagnostic:interview-stress": "npx tsx src/diagnostics/interviewStressDiagnostic.ts",
     "diagnostic:pipeline-correctness": "npx tsx src/diagnostics/pipelineCorrectnessDiagnostic.ts",
     "diagnostic:follow-up-context": "npx tsx src/diagnostics/followUpContextDiagnostic.ts",
+    "diagnostic:intent-routing": "npx tsx src/diagnostics/intentRoutingDiagnostic.ts",
     "test": "vitest run",
     "build": "tsc -p tsconfig.node.json && vite build"
   },

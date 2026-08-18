@@ -24,10 +24,10 @@ describe("Phase 5: Interview Stress Test Harness & Observability Tests", () => {
     // Verify numeric integrity (DR55, 40%, position 3.2 are not corrupted to money)
     expect(summary.numericFactIntegrityRate).toBe(100);
 
-    // Verify candidate experience safety is observed and reported
-    expect(summary.candidateExperienceSafetyViolations).toBe(1);
+    // Verify candidate experience safety is observed and strictly enforced (0 violations)
+    expect(summary.candidateExperienceSafetyViolations).toBe(0);
     const q1 = results.find((r) => r.id === "Q1");
-    expect(q1?.failureReasons.some((f) => f.includes("CANDIDATE_EXPERIENCE_VIOLATION"))).toBe(true);
+    expect(q1?.candidateExperienceViolation).toBe(false);
 
     // Verify intent accuracy & AnswerContract accuracy baseline
     expect(summary.intentAccuracy).toBeGreaterThanOrEqual(75);

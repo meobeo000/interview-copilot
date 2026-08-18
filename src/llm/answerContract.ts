@@ -2,6 +2,7 @@ import type { CandidateProfile } from "../shared/candidateProfile";
 import type { QuestionIntent, QuestionIntentCategory } from "../question-detector/intentClassifier";
 import type { SemanticEvidenceState } from "../question-detector/semanticEvidence";
 import type { KnowledgeChunk, KnowledgeSourceType } from "../knowledge/types";
+import { classifyQuestionShape } from "../question-detector/questionShapeClassifier";
 
 export type AnswerContractType =
   | "DIRECT_ALLOCATION"
@@ -303,23 +304,21 @@ export function evaluateCandidateExperience(
     };
   }
 
-  // Hands-on execution check: inspect candidate projects and experienceNotes only
-  // seoSkills alone CANNOT enable autobiographical claims
+  // Hands-on execution check: inspect candidate projects only!
+  // seoSkills and aspirational notes ("Đang học hỏi...") in experienceNotes CANNOT enable autobiographical claims
   const supportedTopics: string[] = [];
   const supportingProjectIds: string[] = [];
   let evidenceType: CandidateEvidenceType = "NONE";
 
   const projectCorpus = (profile.projects || [])
+    .filter((p) => Boolean(p.name && (p.description || p.role || p.metrics)))
     .map((p) => ({
       name: p.name,
       text: `${p.name} ${p.role || ""} ${p.description || ""} ${p.metrics || ""}`.toLowerCase()
     }));
 
-  const noteCorpus = (profile.experienceNotes || "").toLowerCase();
-
   for (const topic of targetedTopics) {
     const triggers = techniqueKeywords[topic];
-    let topicSupported = false;
 
     // Check project descriptions
     for (const p of projectCorpus) {
@@ -327,21 +326,12 @@ export function evaluateCandidateExperience(
         supportedTopics.push(topic);
         supportingProjectIds.push(p.name);
         evidenceType = "PROJECT";
-        topicSupported = true;
         break;
-      }
-    }
-
-    // Check explicit experience notes
-    if (!topicSupported && triggers.some((tr) => noteCorpus.includes(tr))) {
-      supportedTopics.push(topic);
-      if (evidenceType === "NONE") {
-        evidenceType = "EXPLICIT_EXPERIENCE_NOTE";
       }
     }
   }
 
-  const allSupported = targetedTopics.length > 0 && targetedTopics.every((t) => supportedTopics.includes(t));
+  const allSupported = projectCorpus.length > 0 && targetedTopics.length > 0 && targetedTopics.every((t) => supportedTopics.includes(t));
 
   return {
     allowed: allSupported && supportedTopics.length > 0,
@@ -349,7 +339,7 @@ export function evaluateCandidateExperience(
     supportingProjectIds: Array.from(new Set(supportingProjectIds)),
     evidenceType: allSupported ? evidenceType : "NONE",
     reason: allSupported
-      ? `Candidate profile has verified hands-on evidence for: ${supportedTopics.join(", ")}`
+      ? `Candidate profile has verified hands-on project evidence for: ${supportedTopics.join(", ")}`
       : `Candidate profile lacks hands-on project evidence for: ${targetedTopics.filter((t) => !supportedTopics.includes(t)).join(", ")}`
   };
 }
@@ -496,6 +486,9 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
     intentCategory = followUpContext.inheritedIntent;
   }
 
+  // Question shape detection for multi-factor routing
+  const shapeResult = classifyQuestionShape(question);
+
   // 1. Extract Required Facts
   const requiredFacts: string[] = [];
   if (semanticEvidence?.moneyAmounts && semanticEvidence.moneyAmounts.length > 0) {
@@ -545,6 +538,7 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
   // Fallback entity scan from question text
   const qLower = question.toLowerCase();
   const lexiconCheck = [
+    { name: "iGaming", matches: ["igaming", "casino", "betting", "nhà cái"] },
     { name: "content", matches: ["content", "bài viết", "nội dung"] },
     { name: "Entity", matches: ["entity", "en ti ti", "social trust"] },
     { name: "Guest Post", matches: ["guest post", "guestpost", "gét pót"] },
@@ -556,7 +550,13 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
     { name: "GA4", matches: ["ga4", "analytics"] },
     { name: "Ahrefs", matches: ["ahrefs", "a href"] },
     { name: "301", matches: ["301", "redirect"] },
-    { name: "expired domain", matches: ["expired domain", "domain cũ", "tên miền cũ"] }
+    { name: "expired domain", matches: ["expired domain", "domain cũ", "tên miền cũ", "săn domain"] },
+    { name: "money site", matches: ["money site", "money page", "site chính", "trang chính"] },
+    { name: "money page", matches: ["money page", "money site", "trang đích", "landing page"] },
+    { name: "negative SEO", matches: ["negative seo", "link bẩn", "link spam", "backlink spam", "disavow"] },
+    { name: "DR", matches: ["dr", "ahrefs dr"] },
+    { name: "traffic", matches: ["traffic", "organic traffic"] },
+    { name: "indexing", matches: ["index", "indexing", "cắn index", "mở bot"] }
   ];
 
   for (const item of lexiconCheck) {
@@ -604,12 +604,13 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
     }
   }
 
-  // 4. Shape-specific Directives (Clean of global hard-coded numbers)
+  // 4. Multi-Factor Shape & Intent Directives
   let answerType: AnswerContractType = "DIRECT_STRATEGY_WORKFLOW";
   let firstSentenceDirective = "Sentence 1 MUST directly state your stance or initial response to the interviewer without fluff.";
   let preferredStructure = "Sentence 1: Direct answer. Sentence 2-3: Practical reasoning with SEO terms. Sentence 4: Signal-based condition.";
   let maxWords = 110;
 
+  // Intent & Shape Matrix Routing
   switch (intentCategory) {
     case "BUDGET_ALLOCATION":
       answerType = "DIRECT_ALLOCATION";
@@ -631,6 +632,18 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
       maxWords = 100;
       break;
 
+    case "REDIRECT_301":
+      if (shapeResult.primaryShape === "TIMING" && !question.toLowerCase().includes("không 301") && !question.toLowerCase().includes("quyết định 301")) {
+        answerType = "DIRECT_TIMING_EXPLANATION";
+        firstSentenceDirective = `Sentence 1 MUST clarify the specific timing and conditions before performing 301 redirect.`;
+      } else {
+        answerType = "DIRECT_DECISION";
+        firstSentenceDirective = `Sentence 1 MUST give a clear decision (301 redirect vs rebuild separate site) based on domain history and relevance.`;
+      }
+      preferredStructure = "Sentence 1: Explicit decision/timing. Sentence 2-3: Technical reasoning (topical relevance, link equity preservation). Sentence 4: Monitoring plan in GSC.";
+      maxWords = 100;
+      break;
+
     case "NO_KEYWORD_SIGNAL":
       answerType = "DIRECT_ACTION_DIAGNOSIS";
       firstSentenceDirective = `Sentence 1 MUST state the immediate diagnostic action and caution (e.g. "Em chưa đi thêm link ngay, em check lại indexing, on-page và internal link trước.").`;
@@ -646,9 +659,14 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
       break;
 
     case "NEGATIVE_SEO":
-      answerType = "DIRECT_DECISION";
-      firstSentenceDirective = `Sentence 1 MUST state whether to disavow immediately or observe (e.g. "Em chưa disavow ngay, em kiểm tra xem link spam đã index và ảnh hưởng ranking chưa.").`;
-      preferredStructure = "Sentence 1: Direct decision (don't panic disavow). Sentence 2-3: Immediate checks (Ahrefs spike, GSC manual action, ranking drop). Sentence 4: Disavow and link cleanup condition.";
+      if (shapeResult.primaryShape === "DIAGNOSIS" || question.toLowerCase().includes("phân biệt") || question.toLowerCase().includes("kiểm tra")) {
+        answerType = "DIRECT_ACTION_DIAGNOSIS";
+        firstSentenceDirective = `Sentence 1 MUST state the immediate diagnostic check (Ahrefs spike vs GSC indexation vs ranking impact).`;
+      } else {
+        answerType = "DIRECT_DECISION";
+        firstSentenceDirective = `Sentence 1 MUST state whether to disavow immediately or observe (e.g. "Em chưa disavow ngay, em kiểm tra xem link spam đã index và ảnh hưởng ranking chưa.").`;
+      }
+      preferredStructure = "Sentence 1: Direct stance. Sentence 2-3: Immediate checks (Ahrefs spike, GSC manual action, ranking drop). Sentence 4: Disavow and link cleanup condition.";
       maxWords = 100;
       break;
 
@@ -661,11 +679,26 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
       maxWords = 110;
       break;
 
-    default:
+    case "PROJECT_EXPERIENCE":
       answerType = "DIRECT_STRATEGY_WORKFLOW";
-      firstSentenceDirective = "Sentence 1 MUST give a direct spoken response addressing the interview question.";
-      preferredStructure = "Sentence 1: Direct stance. Sentence 2-3: Hands-on workflow steps. Sentence 4: Signal-based condition.";
-      maxWords = 110;
+      firstSentenceDirective = "Sentence 1 MUST directly summarize the project scope, timeline, or launch workflow from kickoff to ranking.";
+      preferredStructure = "Sentence 1: Project overview/starting phase. Sentence 2-3: Step-by-step technical and link building execution. Sentence 4: Results achieved or ranking signal milestone.";
+      maxWords = 120;
+      break;
+
+    case "STRATEGY_PLAN":
+    default:
+      if (shapeResult.primaryShape === "ALLOCATION") {
+        answerType = "DIRECT_ALLOCATION";
+        firstSentenceDirective = `Sentence 1 MUST give a clear percentage/ratio distribution across the requested categories (${requiredEntities.join(", ") || "Brand, Generic, Exact Match"}).`;
+        preferredStructure = "Sentence 1: Direct percentage/ratio breakdown. Sentence 2-3: Strategic reasoning for the ratio. Sentence 4: Adjustment criteria.";
+        maxWords = 110;
+      } else {
+        answerType = "DIRECT_STRATEGY_WORKFLOW";
+        firstSentenceDirective = "Sentence 1 MUST give a direct spoken response addressing the interview question.";
+        preferredStructure = "Sentence 1: Direct stance. Sentence 2-3: Hands-on workflow steps. Sentence 4: Signal-based condition.";
+        maxWords = 110;
+      }
       break;
   }
 
