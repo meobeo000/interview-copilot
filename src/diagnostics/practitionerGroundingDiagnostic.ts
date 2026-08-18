@@ -323,7 +323,82 @@ const TEST_CASES: DiagnosticTestCase[] = [
     expectedRefIds: []
   },
 
-  // 11. Anti-Template Cases
+  // 11. Substring Collision Adversarial Controls
+  {
+    id: "adv-01",
+    name: "Domain authority drop must NOT match 'domain a'",
+    category: "DOMAIN_NEGATIVE",
+    question: "Domain authority của site giảm nhưng traffic vẫn ổn.",
+    intent: "GSC_RANKING_DROP",
+    expectedRefIds: [],
+    forbiddenRefIds: ["ref:domain-hunting-evaluation"]
+  },
+  {
+    id: "adv-02",
+    name: "Domain backlink profile drop must NOT match 'domain b'",
+    category: "DOMAIN_NEGATIVE",
+    question: "Domain backlink profile đang mất referring domains.",
+    intent: "GSC_RANKING_DROP",
+    expectedRefIds: [],
+    forbiddenRefIds: ["ref:domain-hunting-evaluation"]
+  },
+  {
+    id: "adv-03",
+    name: "Tool inquiry for Domain Authority must NOT match 'domain a'",
+    category: "DOMAIN_NEGATIVE",
+    question: "Em check Domain Authority bằng tool nào?",
+    intent: "ONPAGE_DIAGNOSIS",
+    expectedRefIds: [],
+    forbiddenRefIds: ["ref:domain-hunting-evaluation"]
+  },
+  {
+    id: "adv-04",
+    name: "'Con anchor' must NOT match 'con a'",
+    category: "DOMAIN_NEGATIVE",
+    question: "Con anchor này đang exact match quá cao.",
+    intent: "ONPAGE_DIAGNOSIS",
+    expectedRefIds: [],
+    forbiddenRefIds: ["ref:domain-hunting-evaluation"]
+  },
+  {
+    id: "adv-05",
+    name: "Domain A vs Domain B selection with DR metrics",
+    category: "DOMAIN",
+    question: "Domain A DR 60, Domain B DR 25, em chọn con nào?",
+    intent: "DOMAIN_SELECTION",
+    expectedRefIds: ["ref:domain-hunting-evaluation"]
+  },
+  {
+    id: "adv-06",
+    name: "Con A vs con B in DOMAIN_SELECTION context",
+    category: "DOMAIN",
+    question: "Anh có con A và con B, em chọn con nào?",
+    intent: "DOMAIN_SELECTION",
+    expectedRefIds: ["ref:domain-hunting-evaluation"]
+  },
+  {
+    id: "adv-07",
+    name: "Follow-up 'Domain authority thì sao?' after ranking drop must NOT match 'domain a'",
+    category: "DOMAIN_NEGATIVE",
+    question: "Domain authority thì sao?",
+    intent: "GSC_RANKING_DROP",
+    followUpContext: {
+      followUpType: "ENTITY_CONTINUATION",
+      contextResolved: true,
+      currentUtterance: "Domain authority thì sao?",
+      previousQuestion: "Site giảm traffic nhưng indexing vẫn bình thường.",
+      targetEntity: "Domain authority",
+      inheritedIntent: "GSC_RANKING_DROP",
+      inheritedEntities: ["traffic", "indexing", "domain authority"],
+      inheritedNumericFacts: [],
+      resolutionMs: 0.1,
+      resolvedMeaning: "Còn đối với Domain authority thì đánh giá như thế nào?"
+    },
+    expectedRefIds: [],
+    forbiddenRefIds: ["ref:domain-hunting-evaluation"]
+  },
+
+  // 12. Anti-Template Cases
   {
     id: "anti-01",
     name: "Anti-template: Domain evaluation does not default to PBN impression formula",
@@ -350,6 +425,9 @@ export async function runPractitionerGroundingDiagnostic(): Promise<boolean> {
   console.log("================================================================================\n");
 
   const retriever = getPractitionerReferenceRetriever();
+  // Warm up JIT / Regex cache
+  retriever.retrieve({ question: "warmup domain query", intent: "DOMAIN_SELECTION" });
+
   const totalTests = TEST_CASES.length;
   let passedTests = 0;
 

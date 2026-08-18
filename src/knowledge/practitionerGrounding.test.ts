@@ -343,4 +343,91 @@ describe("Phase 6.5.1 — Practitioner Grounding Hardening & Safety Suite", () =
 
     expect(result.references.length).toBe(0);
   });
+
+  // Adversarial Boundary Tests
+  it("Adversarial 1: 'Domain authority của site giảm nhưng traffic vẫn ổn.' does NOT trigger domain hunting", () => {
+    const query = "Domain authority của site giảm nhưng traffic vẫn ổn.";
+    const result = retriever.retrieve({
+      question: query,
+      intent: "GSC_RANKING_DROP"
+    });
+
+    expect(result.references.some((r) => r.id === "ref:domain-hunting-evaluation")).toBe(false);
+    expect(result.references.length).toBe(0);
+  });
+
+  it("Adversarial 2: 'Domain backlink profile đang mất referring domains.' does NOT trigger domain hunting", () => {
+    const query = "Domain backlink profile đang mất referring domains.";
+    const result = retriever.retrieve({
+      question: query,
+      intent: "GSC_RANKING_DROP"
+    });
+
+    expect(result.references.some((r) => r.id === "ref:domain-hunting-evaluation")).toBe(false);
+    expect(result.references.length).toBe(0);
+  });
+
+  it("Adversarial 3: 'Em check Domain Authority bằng tool nào?' does NOT trigger domain hunting", () => {
+    const query = "Em check Domain Authority bằng tool nào?";
+    const result = retriever.retrieve({
+      question: query,
+      intent: "ONPAGE_DIAGNOSIS"
+    });
+
+    expect(result.references.some((r) => r.id === "ref:domain-hunting-evaluation")).toBe(false);
+    expect(result.references.length).toBe(0);
+  });
+
+  it("Adversarial 4: 'Con anchor này đang exact match quá cao.' does NOT trigger domain hunting as 'con a'", () => {
+    const query = "Con anchor này đang exact match quá cao.";
+    const result = retriever.retrieve({
+      question: query,
+      intent: "ONPAGE_DIAGNOSIS"
+    });
+
+    expect(result.references.some((r) => r.id === "ref:domain-hunting-evaluation")).toBe(false);
+    expect(result.references.length).toBe(0);
+  });
+
+  it("Adversarial 5: 'Domain A DR 60, Domain B DR 25, em chọn con nào?' DOES retrieve domain hunting", () => {
+    const query = "Domain A DR 60, Domain B DR 25, em chọn con nào?";
+    const result = retriever.retrieve({
+      question: query,
+      intent: "DOMAIN_SELECTION"
+    });
+
+    expect(result.references.some((r) => r.id === "ref:domain-hunting-evaluation")).toBe(true);
+  });
+
+  it("Adversarial 6: 'Anh có con A và con B, em chọn con nào?' with DOMAIN_SELECTION DOES retrieve domain hunting", () => {
+    const query = "Anh có con A và con B, em chọn con nào?";
+    const result = retriever.retrieve({
+      question: query,
+      intent: "DOMAIN_SELECTION"
+    });
+
+    expect(result.references.some((r) => r.id === "ref:domain-hunting-evaluation")).toBe(true);
+  });
+
+  it("Adversarial 7: follow-up 'Domain authority thì sao?' after ranking drop does NOT trigger domain hunting", () => {
+    const result = retriever.retrieve({
+      question: "Domain authority thì sao?",
+      intent: "GSC_RANKING_DROP",
+      followUpContext: {
+        followUpType: "ENTITY_CONTINUATION",
+        contextResolved: true,
+        currentUtterance: "Domain authority thì sao?",
+        previousQuestion: "Site giảm traffic nhưng indexing vẫn bình thường.",
+        targetEntity: "Domain authority",
+        inheritedIntent: "GSC_RANKING_DROP",
+        inheritedEntities: ["traffic", "indexing", "domain authority"],
+        inheritedNumericFacts: [],
+        resolutionMs: 0.1,
+        resolvedMeaning: "Còn đối với Domain authority thì đánh giá như thế nào?"
+      }
+    });
+
+    expect(result.references.some((r) => r.id === "ref:domain-hunting-evaluation")).toBe(false);
+    expect(result.references.length).toBe(0);
+  });
 });

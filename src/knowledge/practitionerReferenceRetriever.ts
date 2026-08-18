@@ -2,6 +2,7 @@ import type { QuestionIntent, QuestionIntentCategory } from "../question-detecto
 import type { QuestionShape, QuestionShapeResult } from "../question-detector/questionShapeClassifier";
 import type { ResolvedFollowUpContext } from "../question-detector/interviewTurnContext";
 import type { ScenarioConstraints } from "../question-detector/scenarioConstraints";
+import { hasUnicodePhrase } from "../shared/semanticTextMatcher";
 import {
   type PractitionerInterviewReference,
   SEEDED_PRACTITIONER_REFERENCES
@@ -25,6 +26,11 @@ export interface PractitionerReferenceRetrievalResult {
   retrievalElapsedMs: number;
 }
 
+/**
+ * Minimum score required for reference injection.
+ * Qualified semantic inquiry triggers score >= 15.
+ * Weak or incidental substring matches score 0 and are excluded.
+ */
 const MIN_RELEVANCE_THRESHOLD = 8;
 
 export class PractitionerReferenceRetriever {
@@ -77,7 +83,7 @@ export class PractitionerReferenceRetriever {
 
     const scored: Array<{ ref: PractitionerInterviewReference; score: number; priorityTier: number }> = [];
 
-    // Semantic cue check functions
+    // Semantic cue check functions using Unicode-safe boundary matching
     const isDomainHuntingInquiry = (): boolean => {
       if (intentCategory === "DOMAIN_SELECTION") return true;
 
@@ -87,17 +93,19 @@ export class PractitionerReferenceRetriever {
         (followUp.inheritedIntent === "DOMAIN_SELECTION" ||
           followUp.inheritedEntities?.some(
             (e) =>
-              e.includes(".in") ||
-              e.includes(".me") ||
-              e.includes(".my") ||
-              e.toLowerCase().includes("domain a") ||
-              e.toLowerCase().includes("domain b")
+              hasUnicodePhrase(e, ".in") ||
+              hasUnicodePhrase(e, ".me") ||
+              hasUnicodePhrase(e, ".my") ||
+              hasUnicodePhrase(e, "domain a") ||
+              hasUnicodePhrase(e, "domain b") ||
+              hasUnicodePhrase(e, "con a") ||
+              hasUnicodePhrase(e, "con b")
           ))
       ) {
         return true;
       }
 
-      // Explicit domain hunting / expired / selection / TLD cues
+      // Explicit domain hunting / expired / selection / TLD cues with Unicode boundaries
       const domainCues = [
         "expired domain",
         "domain cũ",
@@ -118,6 +126,7 @@ export class PractitionerReferenceRetriever {
         "tld testing",
         "thử nghiệm tld",
         "đuôi tên miền",
+        "đuôi domain",
         ".in",
         ".me",
         ".my",
@@ -131,7 +140,7 @@ export class PractitionerReferenceRetriever {
         "domain để 301",
         "domain 301"
       ];
-      return domainCues.some((cue) => fullSearchText.includes(cue));
+      return domainCues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
     };
 
     const isPbnTimingInquiry = (): boolean => {
@@ -155,7 +164,7 @@ export class PractitionerReferenceRetriever {
         "có nên đi pbn",
         "triển khai pbn"
       ];
-      return pbnTimingCues.some((cue) => fullSearchText.includes(cue));
+      return pbnTimingCues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
     };
 
     const isNoKeywordInquiry = (): boolean => {
@@ -178,7 +187,7 @@ export class PractitionerReferenceRetriever {
         "chưa cắn key",
         "không lên key"
       ];
-      return noKeyCues.some((cue) => fullSearchText.includes(cue));
+      return noKeyCues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
     };
 
     const isRedirect301Inquiry = (): boolean => {
@@ -198,19 +207,19 @@ export class PractitionerReferenceRetriever {
         "chuyển hướng 301",
         "domain để 301"
       ];
-      return r301Cues.some((cue) => fullSearchText.includes(cue));
+      return r301Cues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
     };
 
     const isProjectInitialExecutionInquiry = (): boolean => {
       if (intentCategory === "BUDGET_ALLOCATION") {
         return (
-          fullSearchText.includes("20 triệu") ||
-          fullSearchText.includes("20m") ||
-          fullSearchText.includes("50 triệu") ||
-          fullSearchText.includes("ngân sách") ||
-          fullSearchText.includes("budget") ||
-          fullSearchText.includes("khởi điểm") ||
-          fullSearchText.includes("site mới")
+          hasUnicodePhrase(fullSearchText, "20 triệu") ||
+          hasUnicodePhrase(fullSearchText, "20m") ||
+          hasUnicodePhrase(fullSearchText, "50 triệu") ||
+          hasUnicodePhrase(fullSearchText, "ngân sách") ||
+          hasUnicodePhrase(fullSearchText, "budget") ||
+          hasUnicodePhrase(fullSearchText, "khởi điểm") ||
+          hasUnicodePhrase(fullSearchText, "site mới")
         );
       }
       const initialCues = [
@@ -223,7 +232,7 @@ export class PractitionerReferenceRetriever {
         "site mới triển khai",
         "site betting mới hoàn toàn"
       ];
-      return initialCues.some((cue) => fullSearchText.includes(cue));
+      return initialCues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
     };
 
     const isNegativeSeoInquiry = (): boolean => {
@@ -240,7 +249,7 @@ export class PractitionerReferenceRetriever {
         "bị đối thủ bắn",
         "disavow"
       ];
-      return negSeoCues.some((cue) => fullSearchText.includes(cue));
+      return negSeoCues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
     };
 
     for (const ref of this.references) {
@@ -300,7 +309,7 @@ export class PractitionerReferenceRetriever {
       // Applicable entity matches if score already started
       if (score > 0 && ref.applicableEntities) {
         for (const ent of ref.applicableEntities) {
-          if (fullSearchText.includes(ent.toLowerCase())) {
+          if (hasUnicodePhrase(fullSearchText, ent)) {
             score += 2;
           }
         }

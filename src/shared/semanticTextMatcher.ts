@@ -20,15 +20,24 @@ export function normalizeSemanticText(text: string): string {
     .trim();
 }
 
+const tokenRegexCache = new Map<string, RegExp>();
+const phraseRegexCache = new Map<string, RegExp>();
+
 /**
  * Tests if `text` contains `token` as an isolated word/token, respecting Unicode word boundaries.
  * `token` must not be a substring of a larger word (e.g., 'DR' in 'address', or 'b' in 'bắt').
  */
 export function hasUnicodeToken(text: string, token: string, caseInsensitive = true): boolean {
   if (!text || !token) return false;
-  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const flags = caseInsensitive ? "gui" : "gu";
-  const regex = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, flags);
+  const cacheKey = `${caseInsensitive ? "i:" : "s:"}${token}`;
+  let regex = tokenRegexCache.get(cacheKey);
+  if (!regex) {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const flags = caseInsensitive ? "gui" : "gu";
+    regex = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, flags);
+    tokenRegexCache.set(cacheKey, regex);
+  }
+  regex.lastIndex = 0;
   return regex.test(text.normalize("NFC"));
 }
 
@@ -37,15 +46,21 @@ export function hasUnicodeToken(text: string, token: string, caseInsensitive = t
  */
 export function hasUnicodePhrase(text: string, phrase: string, caseInsensitive = true): boolean {
   if (!text || !phrase) return false;
-  const normalizedPhrase = normalizeSemanticText(phrase);
-  // Match whitespace flexibilities between words in phrase
-  const escaped = normalizedPhrase
-    .split(/\s+/)
-    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("\\s+");
+  const cacheKey = `${caseInsensitive ? "i:" : "s:"}${phrase}`;
+  let regex = phraseRegexCache.get(cacheKey);
+  if (!regex) {
+    const normalizedPhrase = normalizeSemanticText(phrase);
+    // Match whitespace flexibilities between words in phrase
+    const escaped = normalizedPhrase
+      .split(/\s+/)
+      .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("\\s+");
 
-  const flags = caseInsensitive ? "gui" : "gu";
-  const regex = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, flags);
+    const flags = caseInsensitive ? "gui" : "gu";
+    regex = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, flags);
+    phraseRegexCache.set(cacheKey, regex);
+  }
+  regex.lastIndex = 0;
   return regex.test(text.normalize("NFC"));
 }
 
