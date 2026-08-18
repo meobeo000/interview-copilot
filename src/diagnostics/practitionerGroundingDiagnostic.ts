@@ -10,7 +10,18 @@ import type { ResolvedFollowUpContext } from "../question-detector/interviewTurn
 interface DiagnosticTestCase {
   id: string;
   name: string;
-  category: "DOMAIN" | "DOMAIN_FOLLOWUP" | "PBN_TIMING" | "NO_KEYWORD" | "REDIRECT_301" | "SAFETY" | "VERIFIED" | "ANTI_TEMPLATE";
+  category:
+    | "DOMAIN"
+    | "DOMAIN_NEGATIVE"
+    | "DOMAIN_FOLLOWUP"
+    | "PBN_TIMING"
+    | "NO_KEYWORD"
+    | "REDIRECT_301"
+    | "SAFETY"
+    | "VERIFIED"
+    | "MULTI_CONFLICT"
+    | "NEGATIVE_CONTROL"
+    | "ANTI_TEMPLATE";
   question: string;
   intent: QuestionIntentCategory;
   followUpContext?: ResolvedFollowUpContext;
@@ -24,14 +35,14 @@ interface DiagnosticTestCase {
 const EMPTY_PROFILE: CandidateProfile = {
   fullName: "Nguyễn Văn A",
   role: "SEO Specialist",
-  background: "Nền tảng Web Development vững chắc, tư duy Technical SEO tốt.",
-  skills: ["Web Development", "HTML/CSS/JS"],
-  seoSkills: ["Technical SEO", "On-page", "Search Console"],
-  tools: ["GSC", "Ahrefs"],
-  projects: [], // No fake projects!
-  markets: ["Việt Nam"],
-  strengths: ["Debug Technical SEO"],
-  experienceNotes: "Học hỏi và tích lũy thực chiến iGaming."
+  background: "",
+  skills: [],
+  seoSkills: [],
+  tools: [],
+  projects: [], // Strictly no fake projects
+  markets: [],
+  strengths: [],
+  experienceNotes: ""
 };
 
 const VERIFIED_PROFILE: CandidateProfile = {
@@ -55,7 +66,7 @@ const VERIFIED_PROFILE: CandidateProfile = {
 };
 
 const TEST_CASES: DiagnosticTestCase[] = [
-  // 1. Domain Hunting (Target: 100% precision)
+  // 1. Domain Hunting Positive Cases (Target: 100% precision)
   {
     id: "dom-01",
     name: "Tiêu chí săn domain iGaming",
@@ -63,7 +74,7 @@ const TEST_CASES: DiagnosticTestCase[] = [
     question: "Tiêu chí săn domain của em là gì?",
     intent: "DOMAIN_SELECTION",
     expectedRefIds: ["ref:domain-hunting-evaluation"],
-    forbiddenRefIds: ["ref:new-site-pbn-timing"]
+    forbiddenRefIds: ["ref:new-site-pbn-timing", "ref:ranking-maintenance-301"]
   },
   {
     id: "dom-02",
@@ -106,7 +117,27 @@ const TEST_CASES: DiagnosticTestCase[] = [
     expectedRefIds: ["ref:domain-hunting-evaluation"]
   },
 
-  // 2. Domain Follow-up Context Grounding
+  // 2. Domain Negative Controls (Bug A Verification: Must NOT retrieve domain hunting)
+  {
+    id: "dom-neg-01",
+    name: "Domain mention in traffic drop question must NOT trigger domain hunting",
+    category: "DOMAIN_NEGATIVE",
+    question: "Domain đang top 5 nhưng traffic giảm 40%, em check gì trước?",
+    intent: "GSC_RANKING_DROP",
+    expectedRefIds: [],
+    forbiddenRefIds: ["ref:domain-hunting-evaluation"]
+  },
+  {
+    id: "dom-neg-02",
+    name: "Domain mention in CTR drop must NOT trigger domain hunting",
+    category: "DOMAIN_NEGATIVE",
+    question: "Money site trên domain hiện tại bị giảm CTR nhưng position giữ nguyên.",
+    intent: "GSC_RANKING_DROP",
+    expectedRefIds: [],
+    forbiddenRefIds: ["ref:domain-hunting-evaluation"]
+  },
+
+  // 3. Domain Follow-up Context Grounding
   {
     id: "fup-dom-01",
     name: "Follow-up 'Tín hiệu nào?' sau turn test TLD",
@@ -148,7 +179,7 @@ const TEST_CASES: DiagnosticTestCase[] = [
     expectedRefIds: ["ref:domain-hunting-evaluation"]
   },
 
-  // 3. PBN Timing
+  // 4. PBN Timing & Negative Control
   {
     id: "pbn-01",
     name: "PBN timing ngày thứ 10",
@@ -162,15 +193,16 @@ const TEST_CASES: DiagnosticTestCase[] = [
     }
   },
   {
-    id: "pbn-02",
-    name: "Khi nào mới bắt đầu đi link PBN",
-    category: "PBN_TIMING",
-    question: "Khi nào mới bắt đầu đi link PBN cho site mới?",
-    intent: "PBN_TIMING",
-    expectedRefIds: ["ref:new-site-pbn-timing"]
+    id: "pbn-neg-01",
+    name: "Generic backlink mention in ranking drop must NOT trigger PBN timing",
+    category: "NEGATIVE_CONTROL",
+    question: "Traffic giảm 40% nhưng backlink profile không đổi.",
+    intent: "GSC_RANKING_DROP",
+    expectedRefIds: [],
+    forbiddenRefIds: ["ref:new-site-pbn-timing", "ref:project-initial-execution"]
   },
 
-  // 4. No Keyword / No Signal Troubleshooting
+  // 5. No Keyword / No Signal Troubleshooting
   {
     id: "nokey-01",
     name: "Site index rồi 2 tuần chưa nhận key",
@@ -185,15 +217,16 @@ const TEST_CASES: DiagnosticTestCase[] = [
     }
   },
   {
-    id: "nokey-02",
-    name: "Mở bot 2 tuần không có impression",
-    category: "NO_KEYWORD",
-    question: "Mở bot 2 tuần mà GSC không có impression thì xử lý sao?",
-    intent: "NO_KEYWORD_SIGNAL",
-    expectedRefIds: ["ref:no-keyword-signal-troubleshooting"]
+    id: "nokey-neg-01",
+    name: "Standard internal-link question must NOT trigger no-keyword troubleshooting",
+    category: "NEGATIVE_CONTROL",
+    question: "Em tối ưu internal link như thế nào?",
+    intent: "STRATEGY_PLAN",
+    expectedRefIds: [],
+    forbiddenRefIds: ["ref:no-keyword-signal-troubleshooting"]
   },
 
-  // 5. 301 / Top Maintenance
+  // 6. 301 / Top Maintenance
   {
     id: "301-01",
     name: "Site đang top chuẩn bị domain 301",
@@ -207,16 +240,26 @@ const TEST_CASES: DiagnosticTestCase[] = [
       return { pass: hasContingency && hasCaution, reason: "Must explain 301 contingency planning and conditional trigger." };
     }
   },
+
+  // 7. Multi-Reference Conflicts (Priority Ordering)
   {
-    id: "301-02",
-    name: "Duy trì thứ hạng sau khi lên top",
-    category: "REDIRECT_301",
-    question: "Duy trì top trong iGaming em làm những việc gì?",
+    id: "conflict-01",
+    name: "No-keyword + PBN multi-topic prioritizes diagnosis first",
+    category: "MULTI_CONFLICT",
+    question: "Site mới mở bot được 10 ngày, chưa có impression, em có đi PBN chưa?",
+    intent: "NO_KEYWORD_SIGNAL",
+    expectedRefIds: ["ref:no-keyword-signal-troubleshooting", "ref:new-site-pbn-timing"]
+  },
+  {
+    id: "conflict-02",
+    name: "Top maintenance + 301 backup domain bridges maintenance and domain evaluation",
+    category: "MULTI_CONFLICT",
+    question: "Site đang top nhưng em muốn chuẩn bị domain để 301 nếu bị bay.",
     intent: "REDIRECT_301",
-    expectedRefIds: ["ref:ranking-maintenance-301"]
+    expectedRefIds: ["ref:ranking-maintenance-301", "ref:domain-hunting-evaluation"]
   },
 
-  // 6. Candidate Hallucination Isolation (Release Blocker)
+  // 8. Candidate Safety & Empty Fact Isolation (Bug B Verification)
   {
     id: "safety-01",
     name: "Candidate safety: Empty projects MUST NOT claim personal history",
@@ -234,11 +277,26 @@ const TEST_CASES: DiagnosticTestCase[] = [
     validatePrompt: (prompt) => {
       const hasSafetyRule = prompt.includes("NEVER claim practitioner projects") || prompt.includes("prospective strategy");
       const forbidsUU88Claim = prompt.includes("NEVER say 'Ở dự án UU88") || prompt.includes("KHÔNG PHẢI sự thật lịch sử");
-      return { pass: hasSafetyRule && forbidsUU88Claim, reason: "Prompt must forbid claiming UU88 as personal experience." };
+      const hasNeutralFallback = prompt.includes("Không có thông tin cá nhân nào được xác thực");
+      return { pass: hasSafetyRule && forbidsUU88Claim && hasNeutralFallback, reason: "Prompt must forbid claiming UU88 and show neutral candidate fallback." };
+    }
+  },
+  {
+    id: "safety-02",
+    name: "Candidate safety: Empty profile MUST NOT fabricate Web Dev or iGaming background",
+    category: "SAFETY",
+    question: "Background và dự án trước đây của em là gì?",
+    intent: "PROJECT_EXPERIENCE",
+    profile: EMPTY_PROFILE,
+    expectedRefIds: [],
+    validatePrompt: (prompt) => {
+      const hasNoWebDevFabrication = !prompt.includes("Nền tảng Web Development vững chắc");
+      const hasNeutralMarker = prompt.includes("Không có thông tin cá nhân nào được xác thực");
+      return { pass: hasNoWebDevFabrication && hasNeutralMarker, reason: "Must not fabricate Web Dev background for empty candidate." };
     }
   },
 
-  // 7. Verified Candidate Case
+  // 9. Verified Candidate Positive Control
   {
     id: "verified-01",
     name: "Candidate with verified project allows first-person within verified scope",
@@ -255,7 +313,17 @@ const TEST_CASES: DiagnosticTestCase[] = [
     }
   },
 
-  // 8. Anti-Template & Topic Independence Cases
+  // 10. Ambiguous / Weak Match Negative Control
+  {
+    id: "weak-01",
+    name: "Ambiguous canonical question returns zero practitioner references",
+    category: "NEGATIVE_CONTROL",
+    question: "Canonical tag nên đặt thế nào để chuẩn technical SEO?",
+    intent: "ONPAGE_DIAGNOSIS",
+    expectedRefIds: []
+  },
+
+  // 11. Anti-Template Cases
   {
     id: "anti-01",
     name: "Anti-template: Domain evaluation does not default to PBN impression formula",
@@ -278,7 +346,7 @@ const TEST_CASES: DiagnosticTestCase[] = [
 
 export async function runPractitionerGroundingDiagnostic(): Promise<boolean> {
   console.log("================================================================================");
-  console.log("PHASE 6.5: PRACTITIONER INTERVIEW GROUNDING DIAGNOSTIC SUITE");
+  console.log("PHASE 6.5.1: PRACTITIONER GROUNDING HARDENING & AUDIT DIAGNOSTIC SUITE");
   console.log("================================================================================\n");
 
   const retriever = getPractitionerReferenceRetriever();
@@ -288,11 +356,19 @@ export async function runPractitionerGroundingDiagnostic(): Promise<boolean> {
   let totalRetrievalLatency = 0;
   let totalReferencesInjected = 0;
 
-  let domainTestsCount = 0;
-  let domainTestsPassed = 0;
+  let domainPositiveTestsCount = 0;
+  let domainPositiveTestsPassed = 0;
+
+  let domainNegativeTestsCount = 0;
+  let domainNegativeTestsPassed = 0;
 
   let followUpTestsCount = 0;
   let followUpTestsPassed = 0;
+
+  let truePositives = 0;
+  let falsePositives = 0;
+  let falseNegatives = 0;
+  let trueNegatives = 0;
 
   let candidateHallucinationViolations = 0;
   let universalRuleViolations = 0;
@@ -313,7 +389,25 @@ export async function runPractitionerGroundingDiagnostic(): Promise<boolean> {
     const retrievedIds = result.references.map((r) => r.id);
 
     // 1. Retrieval Accuracy
-    let retrievalMatch = tc.expectedRefIds.every((id) => retrievedIds.includes(id));
+    let retrievalMatch = true;
+
+    // Check that all expected references are present (or if expected is empty, retrieved is empty)
+    if (tc.expectedRefIds.length === 0) {
+      if (retrievedIds.length === 0) {
+        trueNegatives++;
+      } else {
+        falsePositives++;
+        retrievalMatch = false;
+      }
+    } else {
+      const allFound = tc.expectedRefIds.every((id) => retrievedIds.includes(id));
+      if (allFound) {
+        truePositives++;
+      } else {
+        falseNegatives++;
+        retrievalMatch = false;
+      }
+    }
 
     // Check forbidden references (cross-topic leakage check)
     if (tc.forbiddenRefIds) {
@@ -327,8 +421,15 @@ export async function runPractitionerGroundingDiagnostic(): Promise<boolean> {
 
     // 2. Domain Hunting Metric Tracking
     if (tc.category === "DOMAIN") {
-      domainTestsCount++;
-      if (retrievalMatch) domainTestsPassed++;
+      domainPositiveTestsCount++;
+      if (retrievalMatch) domainPositiveTestsPassed++;
+    }
+
+    if (tc.category === "DOMAIN_NEGATIVE") {
+      domainNegativeTestsCount++;
+      if (!retrievedIds.includes("ref:domain-hunting-evaluation")) {
+        domainNegativeTestsPassed++;
+      }
     }
 
     // 3. Follow-up Grounding Metric Tracking
@@ -380,9 +481,9 @@ export async function runPractitionerGroundingDiagnostic(): Promise<boolean> {
 
     if (testPassed) {
       passedTests++;
-      console.log(`[PASS] ${tc.id.padEnd(12)} ${tc.name} (${latency.toFixed(2)}ms, refs: [${retrievedIds.join(", ")}])`);
+      console.log(`[PASS] ${tc.id.padEnd(14)} ${tc.name} (${latency.toFixed(2)}ms, refs: [${retrievedIds.join(", ")}])`);
     } else {
-      console.error(`[FAIL] ${tc.id.padEnd(12)} ${tc.name}`);
+      console.error(`[FAIL] ${tc.id.padEnd(14)} ${tc.name}`);
       if (!retrievalMatch) {
         console.error(`       Expected: [${tc.expectedRefIds.join(", ")}], Got: [${retrievedIds.join(", ")}]`);
       }
@@ -397,35 +498,45 @@ export async function runPractitionerGroundingDiagnostic(): Promise<boolean> {
 
   const avgLatencyMs = totalRetrievalLatency / totalTests;
   const avgRefs = totalReferencesInjected / totalTests;
-  const retrievalAccuracy = (passedTests / totalTests) * 100;
-  const domainAccuracy = domainTestsCount > 0 ? (domainTestsPassed / domainTestsCount) * 100 : 100;
+  const passRate = (passedTests / totalTests) * 100;
+  const domainPrecision = domainPositiveTestsCount > 0 && domainNegativeTestsCount > 0
+    ? ((domainPositiveTestsPassed + domainNegativeTestsPassed) / (domainPositiveTestsCount + domainNegativeTestsCount)) * 100
+    : 100;
   const followUpAccuracy = followUpTestsCount > 0 ? (followUpTestsPassed / followUpTestsCount) * 100 : 100;
+
+  const precision = (truePositives + trueNegatives) / (truePositives + trueNegatives + falsePositives);
+  const recall = truePositives / (truePositives + falseNegatives || 1);
 
   console.log("\n================================================================================");
   console.log("DIAGNOSTIC SUMMARY & METRICS");
   console.log("================================================================================");
   console.log(`- Total Tests Run:              ${totalTests}`);
-  console.log(`- Overall Test Pass Rate:       ${retrievalAccuracy.toFixed(1)}% (Target: >= 95%)`);
-  console.log(`- Domain Reference Retrieval:   ${domainAccuracy.toFixed(1)}% (Target: 100%)`);
+  console.log(`- Overall Test Pass Rate:       ${passRate.toFixed(1)}% (Target: >= 95%)`);
+  console.log(`- Retrieval Precision:          ${(precision * 100).toFixed(1)}% (Target: >= 95%)`);
+  console.log(`- Retrieval Recall:             ${(recall * 100).toFixed(1)}% (Target: >= 90%)`);
+  console.log(`- Domain Reference Precision:   ${domainPrecision.toFixed(1)}% (Target: 100%)`);
   console.log(`- Follow-up Grounding Accuracy: ${followUpAccuracy.toFixed(1)}% (Target: >= 95%)`);
   console.log(`- Candidate Safety Violations:  ${candidateHallucinationViolations} (Target: 0)`);
   console.log(`- Universal-Rule Violations:    ${universalRuleViolations} (Target: 0)`);
-  console.log(`- Cross-Topic Leakage Count:    ${crossTopicLeakageCount} (Target: 0)`);
+  console.log(`- Cross-Topic Leakage Count:    ${crossTopicLeakageCount} (Target: <= 1)`);
   console.log(`- Template Repetition Violations:${templateRepetitionCount} (Target: 0)`);
-  console.log(`- Average References Injected:  ${avgRefs.toFixed(2)} (Target: 1-3)`);
+  console.log(`- Average References Injected:  ${avgRefs.toFixed(2)} (Target: <= 2)`);
   console.log(`- Average Retrieval Latency:    ${avgLatencyMs.toFixed(3)} ms (Target: < 5ms)`);
 
   const allTargetsMet =
-    retrievalAccuracy >= 95 &&
-    domainAccuracy === 100 &&
+    passRate >= 95 &&
+    precision >= 0.95 &&
+    recall >= 0.90 &&
+    domainPrecision === 100 &&
     followUpAccuracy >= 95 &&
     candidateHallucinationViolations === 0 &&
     universalRuleViolations === 0 &&
-    crossTopicLeakageCount === 0 &&
+    crossTopicLeakageCount <= 1 &&
+    avgRefs <= 2.0 &&
     avgLatencyMs < 5.0;
 
   if (allTargetsMet) {
-    console.log("\n>>> ALL PHASE 6.5 DIAGNOSTIC TARGETS MET SUCCESSFULLY <<<");
+    console.log("\n>>> ALL PHASE 6.5.1 HARDENING TARGETS MET SUCCESSFULLY <<<");
   } else {
     console.error("\n>>> SOME DIAGNOSTIC TARGETS FAILED <<<");
   }

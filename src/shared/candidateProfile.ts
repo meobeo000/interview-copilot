@@ -176,18 +176,31 @@ export function formatProfileForPrompt(profile: CandidateProfile): string {
   const projectSummary =
     profile.projects && profile.projects.length > 0
       ? profile.projects.map((p) => `- Dự án: ${p.name} (${p.role || ""}) - ${p.description || ""} ${p.metrics ? `[${p.metrics}]` : ""}`).join("\n")
-      : "- Chưa có dự án SEO riêng biệt (ứng viên xuất thân Web Dev mạnh về Technical SEO).";
+      : "- Chưa có dự án SEO nào được xác thực (No verified projects).";
 
-  return `
-[CANDIDATE PROFILE (PERSONAL FACTS)]:
-- Ứng viên: ${profile.fullName} (${profile.role})
-- Background: ${profile.background}
-- Kỹ năng & Thế mạnh: ${profile.strengths.join("; ")}
-- Công cụ: ${profile.tools.join(", ")}
-- Kỹ năng SEO: ${profile.seoSkills.join(", ")}
-- Thị trường (Geo): ${profile.markets.join(", ")}
-- Dự án thực tế:
-${projectSummary}
-- Ghi chú: ${profile.experienceNotes}
-`.trim();
+  const lines: string[] = ["[CANDIDATE PROFILE (PERSONAL FACTS)]:"];
+  if (profile.fullName || profile.role) {
+    lines.push(`- Ứng viên: ${profile.fullName || "Ứng viên"}${profile.role ? ` (${profile.role})` : ""}`);
+  }
+  if (profile.background) {
+    lines.push(`- Background: ${profile.background}`);
+  }
+  if (profile.strengths && profile.strengths.length > 0) {
+    lines.push(`- Kỹ năng & Thế mạnh: ${profile.strengths.join("; ")}`);
+  }
+  if (profile.tools && profile.tools.length > 0) {
+    lines.push(`- Công cụ: ${profile.tools.join(", ")}`);
+  }
+  if (profile.seoSkills && profile.seoSkills.length > 0) {
+    lines.push(`- Kỹ năng SEO: ${profile.seoSkills.join(", ")}`);
+  }
+  if (profile.markets && profile.markets.length > 0) {
+    lines.push(`- Thị trường (Geo): ${profile.markets.join(", ")}`);
+  }
+  lines.push("- Dự án thực tế:\n" + projectSummary);
+  if (profile.experienceNotes) {
+    lines.push(`- Ghi chú: ${profile.experienceNotes}`);
+  }
+
+  return lines.join("\n");
 }

@@ -29,21 +29,29 @@ export function buildAnswerKnowledgeContext(options: ContextBuilderOptions): str
   const practitionerLines: string[] = [];
   const generalNotes: string[] = [];
 
-  // 1. Candidate facts from verified profile
+  // 1. Candidate facts from verified profile only (no invented fields)
   if (candidateProfile) {
-    if (candidateProfile.background) {
-      candidateFacts.push(`- Background: ${candidateProfile.background}`);
+    if (candidateProfile.background && candidateProfile.background.trim()) {
+      candidateFacts.push(`- Background: ${candidateProfile.background.trim()}`);
     }
     if (candidateProfile.strengths && candidateProfile.strengths.length > 0) {
-      candidateFacts.push(`- Thế mạnh: ${candidateProfile.strengths.join("; ")}`);
+      const filteredStrengths = candidateProfile.strengths.filter(Boolean);
+      if (filteredStrengths.length > 0) {
+        candidateFacts.push(`- Thế mạnh: ${filteredStrengths.join("; ")}`);
+      }
     }
     if (candidateProfile.seoSkills && candidateProfile.seoSkills.length > 0) {
-      candidateFacts.push(`- Kỹ năng SEO & Công cụ: ${candidateProfile.seoSkills.join(", ")} (${candidateProfile.tools.join(", ")})`);
+      const filteredSkills = candidateProfile.seoSkills.filter(Boolean);
+      const filteredTools = candidateProfile.tools?.filter(Boolean) || [];
+      if (filteredSkills.length > 0) {
+        const toolsPart = filteredTools.length > 0 ? ` (${filteredTools.join(", ")})` : "";
+        candidateFacts.push(`- Kỹ năng SEO & Công cụ: ${filteredSkills.join(", ")}${toolsPart}`);
+      }
     }
     if (candidateProfile.projects && candidateProfile.projects.length > 0) {
       candidateProfile.projects.forEach((p) => {
-        if (p.name) {
-          candidateFacts.push(`- Dự án thật: ${p.name} (${p.role || ""}) - ${p.description || ""} ${p.metrics ? `[${p.metrics}]` : ""}`);
+        if (p.name && p.name.trim()) {
+          candidateFacts.push(`- Dự án thật: ${p.name.trim()} (${p.role || ""}) - ${p.description || ""} ${p.metrics ? `[${p.metrics}]` : ""}`);
         }
       });
     }
@@ -64,7 +72,7 @@ export function buildAnswerKnowledgeContext(options: ContextBuilderOptions): str
     }
   }
 
-  // 3. Practitioner references
+  // 3. Practitioner references (retrieved deterministically if not explicitly passed)
   let practitionerRefs = options.practitionerReferences;
   if (!practitionerRefs && legacyPractitionerChunks.length === 0) {
     const retrieval = getPractitionerReferenceRetriever().retrieve({
@@ -110,11 +118,13 @@ export function buildAnswerKnowledgeContext(options: ContextBuilderOptions): str
   if (candidateFacts.length > 0) {
     sections.push(candidateFacts.join("\n"));
   } else {
-    sections.push("- Ứng viên có nền tảng Web Development vững chắc, tư duy Technical SEO tốt, đang học hỏi & tích lũy thực chiến SEO iGaming.");
+    sections.push("- Không có thông tin cá nhân nào được xác thực (No verified candidate personal facts available).");
   }
 
   // SECTION B: PRACTITIONER INTERVIEW REFERENCE (Second Priority)
-  sections.push(practitionerLines.join("\n"));
+  if (practitionerLines.length > 2) {
+    sections.push(practitionerLines.join("\n"));
+  }
 
   // SECTION C: GENERAL SEO PRINCIPLES (Base Priority)
   if (generalNotes.length > 0) {

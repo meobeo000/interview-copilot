@@ -25,6 +25,8 @@ export interface PractitionerReferenceRetrievalResult {
   retrievalElapsedMs: number;
 }
 
+const MIN_RELEVANCE_THRESHOLD = 8;
+
 export class PractitionerReferenceRetriever {
   private references: PractitionerInterviewReference[];
 
@@ -73,122 +75,256 @@ export class PractitionerReferenceRetriever {
       ...(options.numericFacts || []).map((f) => f.toLowerCase())
     ].join(" ");
 
-    const scored: Array<{ ref: PractitionerInterviewReference; score: number }> = [];
+    const scored: Array<{ ref: PractitionerInterviewReference; score: number; priorityTier: number }> = [];
+
+    // Semantic cue check functions
+    const isDomainHuntingInquiry = (): boolean => {
+      if (intentCategory === "DOMAIN_SELECTION") return true;
+
+      // Follow-up in domain context
+      if (
+        followUp?.contextResolved &&
+        (followUp.inheritedIntent === "DOMAIN_SELECTION" ||
+          followUp.inheritedEntities?.some(
+            (e) =>
+              e.includes(".in") ||
+              e.includes(".me") ||
+              e.includes(".my") ||
+              e.toLowerCase().includes("domain a") ||
+              e.toLowerCase().includes("domain b")
+          ))
+      ) {
+        return true;
+      }
+
+      // Explicit domain hunting / expired / selection / TLD cues
+      const domainCues = [
+        "expired domain",
+        "domain cũ",
+        "tên miền cũ",
+        "săn domain",
+        "săn tên miền",
+        "mua domain",
+        "đánh giá domain",
+        "so sánh domain",
+        "chọn domain",
+        "chọn con nào",
+        "domain a",
+        "domain b",
+        "con a",
+        "con b",
+        "wayback",
+        "wayback machine",
+        "tld testing",
+        "thử nghiệm tld",
+        "đuôi tên miền",
+        ".in",
+        ".me",
+        ".my",
+        ".nl",
+        ".co.in",
+        "domain dự phòng",
+        "domain nhận 301",
+        "chọn domain dự phòng",
+        "chuẩn bị domain để 301",
+        "chuẩn bị domain cho 301",
+        "domain để 301",
+        "domain 301"
+      ];
+      return domainCues.some((cue) => fullSearchText.includes(cue));
+    };
+
+    const isPbnTimingInquiry = (): boolean => {
+      if (intentCategory === "PBN_TIMING") return true;
+      if (followUp?.contextResolved && followUp.inheritedIntent === "PBN_TIMING") return true;
+
+      const pbnTimingCues = [
+        "ngày 10",
+        "ngày thứ 10",
+        "day 10",
+        "10 ngày",
+        "thời điểm đi pbn",
+        "khi nào đi pbn",
+        "khi nào bắn pbn",
+        "thời điểm bắn pbn",
+        "pbn timing",
+        "bắt đầu pbn",
+        "pbn sau bao lâu",
+        "đi pbn chưa",
+        "bắn pbn chưa",
+        "có nên đi pbn",
+        "triển khai pbn"
+      ];
+      return pbnTimingCues.some((cue) => fullSearchText.includes(cue));
+    };
+
+    const isNoKeywordInquiry = (): boolean => {
+      if (intentCategory === "NO_KEYWORD_SIGNAL") return true;
+      if (followUp?.contextResolved && followUp.inheritedIntent === "NO_KEYWORD_SIGNAL") return true;
+
+      const noKeyCues = [
+        "chưa nhận key",
+        "không nhận key",
+        "chưa nhận keyword",
+        "không nhận keyword",
+        "chưa có impression",
+        "không có impression",
+        "2 tuần chưa nhận",
+        "hai tuần chưa nhận",
+        "2 tuần không có impression",
+        "mở bot không nhận",
+        "mở bot chưa nhận",
+        "không cắn key",
+        "chưa cắn key",
+        "không lên key"
+      ];
+      return noKeyCues.some((cue) => fullSearchText.includes(cue));
+    };
+
+    const isRedirect301Inquiry = (): boolean => {
+      if (intentCategory === "REDIRECT_301") return true;
+      if (followUp?.contextResolved && followUp.inheritedIntent === "REDIRECT_301") return true;
+
+      const r301Cues = [
+        "redirect 301",
+        "quyết định 301",
+        "khi nào 301",
+        "chuẩn bị 301",
+        "duy trì top",
+        "top maintenance",
+        "giữ top",
+        "chuẩn bị domain 301",
+        "backup domain cho 301",
+        "chuyển hướng 301",
+        "domain để 301"
+      ];
+      return r301Cues.some((cue) => fullSearchText.includes(cue));
+    };
+
+    const isProjectInitialExecutionInquiry = (): boolean => {
+      if (intentCategory === "BUDGET_ALLOCATION") {
+        return (
+          fullSearchText.includes("20 triệu") ||
+          fullSearchText.includes("20m") ||
+          fullSearchText.includes("50 triệu") ||
+          fullSearchText.includes("ngân sách") ||
+          fullSearchText.includes("budget") ||
+          fullSearchText.includes("khởi điểm") ||
+          fullSearchText.includes("site mới")
+        );
+      }
+      const initialCues = [
+        "ngân sách khởi điểm",
+        "chia ngân sách",
+        "phân bổ ngân sách",
+        "quy trình nhận site mới",
+        "kickoff site mới",
+        "tháng đầu triển khai site mới",
+        "site mới triển khai",
+        "site betting mới hoàn toàn"
+      ];
+      return initialCues.some((cue) => fullSearchText.includes(cue));
+    };
+
+    const isNegativeSeoInquiry = (): boolean => {
+      if (intentCategory === "NEGATIVE_SEO") return true;
+      if (followUp?.contextResolved && followUp.inheritedIntent === "NEGATIVE_SEO") return true;
+
+      const negSeoCues = [
+        "negative seo",
+        "link bẩn",
+        "spam link",
+        "bắn link bẩn",
+        "bắn link spam",
+        "anchor cờ bạc đen",
+        "bị đối thủ bắn",
+        "disavow"
+      ];
+      return negSeoCues.some((cue) => fullSearchText.includes(cue));
+    };
 
     for (const ref of this.references) {
       let score = 0;
+      let priorityTier = 10; // lower number = higher execution priority
 
-      // 1. Intent Alignment (+6 points)
-      if (intentCategory && ref.intents && ref.intents.includes(intentCategory)) {
-        score += 6;
-      }
-
-      // 2. Question Shape Alignment (+3 points)
-      if (primaryShape && ref.questionShapes && ref.questionShapes.includes(primaryShape)) {
-        score += 3;
-      }
-
-      // 3. Applicable Entities / Keyword Matches (+3 to +5 points each)
-      if (ref.applicableEntities) {
-        for (const ent of ref.applicableEntities) {
-          const entLower = ent.toLowerCase();
-          if (fullSearchText.includes(entLower)) {
-            // High-precision entity boost
-            if (entLower.startsWith(".") || entLower === "wayback" || entLower === "pbn" || entLower === "301" || entLower === "disavow" || entLower === "sapo") {
-              score += 5;
-            } else {
-              score += 3;
-            }
-          }
-        }
-      }
-
-      // 4. Topic-specific strong cues
       switch (ref.id) {
         case "ref:domain-hunting-evaluation":
-          if (
-            intentCategory === "DOMAIN_SELECTION" ||
-            fullSearchText.includes("domain") ||
-            fullSearchText.includes("tên miền") ||
-            fullSearchText.includes("expired") ||
-            fullSearchText.includes(".in") ||
-            fullSearchText.includes(".me") ||
-            fullSearchText.includes(".my") ||
-            fullSearchText.includes(".nl") ||
-            fullSearchText.includes(".co.in") ||
-            fullSearchText.includes("wayback") ||
-            fullSearchText.includes("tld")
-          ) {
-            score += 10;
-          }
-          break;
-
-        case "ref:new-site-pbn-timing":
-          if (
-            intentCategory === "PBN_TIMING" ||
-            fullSearchText.includes("ngày 10") ||
-            fullSearchText.includes("day 10") ||
-            (fullSearchText.includes("pbn") && (fullSearchText.includes("thời điểm") || fullSearchText.includes("khi nào") || fullSearchText.includes("bắt đầu")))
-          ) {
-            score += 10;
+          if (isDomainHuntingInquiry()) {
+            score = 15;
+            if (intentCategory === "DOMAIN_SELECTION") score += 5;
+            priorityTier = 1;
           }
           break;
 
         case "ref:no-keyword-signal-troubleshooting":
-          if (
-            intentCategory === "NO_KEYWORD_SIGNAL" ||
-            fullSearchText.includes("không nhận key") ||
-            fullSearchText.includes("chưa nhận key") ||
-            fullSearchText.includes("không có impression") ||
-            fullSearchText.includes("2 tuần") ||
-            fullSearchText.includes("hai tuần") ||
-            (fullSearchText.includes("mở bot") && fullSearchText.includes("key"))
-          ) {
-            score += 10;
+          if (isNoKeywordInquiry()) {
+            score = 15;
+            if (intentCategory === "NO_KEYWORD_SIGNAL") score += 5;
+            priorityTier = 1; // Diagnosis before link escalation
+          }
+          break;
+
+        case "ref:new-site-pbn-timing":
+          if (isPbnTimingInquiry()) {
+            score = 15;
+            if (intentCategory === "PBN_TIMING") score += 5;
+            priorityTier = 2; // Link escalation after diagnosis
           }
           break;
 
         case "ref:ranking-maintenance-301":
-          if (
-            intentCategory === "REDIRECT_301" ||
-            fullSearchText.includes("301") ||
-            fullSearchText.includes("redirect 301") ||
-            (fullSearchText.includes("đang top") && fullSearchText.includes("chuẩn bị domain")) ||
-            fullSearchText.includes("duy trì top")
-          ) {
-            score += 10;
+          if (isRedirect301Inquiry()) {
+            score = 15;
+            if (intentCategory === "REDIRECT_301") score += 5;
+            priorityTier = 1;
           }
           break;
 
         case "ref:project-initial-execution":
-          if (
-            (intentCategory === "BUDGET_ALLOCATION" || intentCategory === "STRATEGY_PLAN") &&
-            (fullSearchText.includes("20 triệu") || fullSearchText.includes("20m") || fullSearchText.includes("khởi điểm") || fullSearchText.includes("site mới"))
-          ) {
-            score += 8;
+          if (isProjectInitialExecutionInquiry()) {
+            score = 15;
+            if (intentCategory === "BUDGET_ALLOCATION") score += 5;
+            priorityTier = 2;
           }
           break;
 
         case "ref:negative-seo-defense":
-          if (
-            intentCategory === "NEGATIVE_SEO" ||
-            fullSearchText.includes("negative seo") ||
-            fullSearchText.includes("link bẩn") ||
-            fullSearchText.includes("disavow")
-          ) {
-            score += 10;
+          if (isNegativeSeoInquiry()) {
+            score = 15;
+            if (intentCategory === "NEGATIVE_SEO") score += 5;
+            priorityTier = 1;
           }
           break;
       }
 
-      // Only include scored items
-      if (score > 0) {
-        scored.push({ ref, score });
+      // Applicable entity matches if score already started
+      if (score > 0 && ref.applicableEntities) {
+        for (const ent of ref.applicableEntities) {
+          if (fullSearchText.includes(ent.toLowerCase())) {
+            score += 2;
+          }
+        }
+      }
+
+      // Shape alignment bonus if score already qualified
+      if (score > 0 && primaryShape && ref.questionShapes && ref.questionShapes.includes(primaryShape)) {
+        score += 2;
+      }
+
+      // Include only if meeting strict confidence threshold
+      if (score >= MIN_RELEVANCE_THRESHOLD) {
+        scored.push({ ref, score, priorityTier });
       }
     }
 
-    // Deterministic sort: highest score first, then stable alphabetical ID
+    // Deterministic sort:
+    // 1. Priority Tier ascending (e.g. diagnosis precedes link building)
+    // 2. Score descending
+    // 3. Stable alphabetical ID
     scored.sort((a, b) => {
+      if (a.priorityTier !== b.priorityTier) {
+        return a.priorityTier - b.priorityTier;
+      }
       if (b.score !== a.score) {
         return b.score - a.score;
       }
