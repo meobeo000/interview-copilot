@@ -16,6 +16,8 @@ export interface QuestionShapeResult {
   secondaryShapes: QuestionShape[];
   confidence: number;
   signals: string[];
+  choiceComparison?: boolean;
+  challengePremiseRequired?: boolean;
 }
 
 /**
@@ -28,6 +30,28 @@ export function classifyQuestionShape(questionText: string): QuestionShapeResult
   const signals: string[] = [];
   const detectedShapes: { shape: QuestionShape; weight: number }[] = [];
 
+  // Binary choice detection across actions (e.g. merge hay rewrite, tối ưu title hay 301, giữ hay bỏ)
+  const choiceComparisonMatch =
+    text.match(/\b(merge\s+hay\s+rewrite|rewrite\s+hay\s+merge|tối\s+ưu.*hay\s+redirect|redirect.*hay\s+tối\s+ưu|301\s+hay\s+tối\s+ưu|tối\s+ưu.*hay\s+301|giữ.*hay\s+bỏ|bỏ.*hay\s+giữ|rebuild\s+hay\s+301|301\s+hay\s+rebuild|chọn\s+con\s+[ab]|domain\s+[ab]|con\s+[ab]|site\s+[ab])\b/i) ||
+    text.match(/\b(?:để|thì)\s+em\s+(?:tối\s+ưu|chọn|làm|merge|rewrite|redirect|301|sửa)\s+.+\s+hay\s+.+\?/i);
+
+  const isChoiceComparison = Boolean(choiceComparisonMatch);
+
+  // False premise / proposition verification shape (e.g. "... đúng không?", "... phải không?")
+  const isPremiseConfirmation = Boolean(
+    matchUnicodePattern(text, "đúng\\s+không|đúng\\s+ko|phải\\s+không|phải\\s+ko|chuẩn\\s+không|đúng\\s+chưa|có\\s+đúng\\s+là") &&
+    matchUnicodePattern(text, "phải\\s+build\\s+đủ|cứ\\s+301|truyền\\s+100%|bắt\\s+buộc\\s+phải|cứ\\s+.+\\s+là|chắc\\s+chắn|luôn\\s+luôn|chỉ\\s+cần\\s+.+\\s+là|phải\\s+.+\\s+mới|cứ\\s+301\\s+toàn\\s+bộ|càng\\s+nhiều\\s+.+\\s+càng")
+  );
+
+  if (isChoiceComparison) {
+    signals.push(`choice_comparison:${choiceComparisonMatch ? choiceComparisonMatch[0] : "binary_choice"}`);
+    detectedShapes.push({ shape: "DECISION", weight: 9 });
+  }
+
+  if (isPremiseConfirmation) {
+    signals.push("challenge_premise");
+  }
+
   // 1. DECISION (Choose between options, buy vs skip, disavow vs wait, rebuild vs redirect)
   const decisionPatterns = [
     "(?:chọn|lấy|mua|ưu\\s+tiên)\\s+(?:con|domain|site|cái|cách|phương\\s+án|bài)?\\s*(?:nào|gì|[ab]|cũ|mới)",
@@ -35,7 +59,7 @@ export function classifyQuestionShape(questionText: string): QuestionShapeResult
     "(?:nên|có\\s+nên|em\\s+có|có)\\s+(?:disavow|redirect|301|mua|lấy|bỏ|chặn|xóa)\\s+(?:ngay|luôn|không|chưa|expired\\s+domain)?",
     "(?:rebuild|dựng\\s+site\\s+riêng|làm\\s+site\\s+mới)\\s+hay\\s+(?:301|redirect)",
     "domain\\s+a\\s+hay\\s+domain\\s+b|con\\s+a\\s+hay\\s+con\\s+b|site\\s+a\\s+hay\\s+site\\s+b|toàn\\s+trang\\s+hay\\s+chỉ\\s+redirect",
-    "giữ\\s+lại\\s+hay\\s+bỏ|lấy\\s+hay\\s+không|có\\s+mua\\s+không|mua\\s+không|merge\\s+bài\\s+hay\\s+sửa"
+    "giữ\\s+lại\\s+hay\\s+bỏ|lấy\\s+hay\\s+không|có\\s+mua\\s+không|mua\\s+không|merge\\s+bài\\s+hay\\s+sửa|merge\\s+hay\\s+rewrite"
   ];
   for (const pattern of decisionPatterns) {
     const match = matchUnicodePattern(text, pattern);
@@ -159,7 +183,9 @@ export function classifyQuestionShape(questionText: string): QuestionShapeResult
       primaryShape: "GENERAL",
       secondaryShapes: [],
       confidence: 0.5,
-      signals: []
+      signals,
+      choiceComparison: isChoiceComparison,
+      challengePremiseRequired: isPremiseConfirmation
     };
   }
 
@@ -177,6 +203,8 @@ export function classifyQuestionShape(questionText: string): QuestionShapeResult
     primaryShape,
     secondaryShapes,
     confidence,
-    signals
+    signals,
+    choiceComparison: isChoiceComparison,
+    challengePremiseRequired: isPremiseConfirmation
   };
 }

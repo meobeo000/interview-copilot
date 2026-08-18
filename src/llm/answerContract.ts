@@ -707,6 +707,19 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
       break;
   }
 
+  // Override answerType for Binary Choices (e.g. merge hay rewrite, tối ưu title hay 301, giữ hay bỏ)
+  if (shapeResult.choiceComparison && intentCategory !== "BUDGET_ALLOCATION") {
+    answerType = "DIRECT_DECISION";
+    firstSentenceDirective = `Sentence 1 MUST state your chosen decision or recommended option immediately (e.g. "Em chọn...", "Em sẽ merge...", "Em ưu tiên..."), then explain the decision criteria.`;
+    preferredStructure = "Sentence 1: Explicit choice/decision. Sentence 2-3: Core decision criteria and technical reasoning. Sentence 4: Verification step in GSC/Ahrefs.";
+  }
+
+  // Override firstSentenceDirective for Premise Confirmation Challenges (e.g. "... đúng không?")
+  if (shapeResult.challengePremiseRequired) {
+    firstSentenceDirective = `Sentence 1 MUST directly evaluate the premise upfront by explicitly agreeing or disagreeing (e.g. "Không, em không cần...", "Không, em sẽ không..."), do not dodge into generic advice, then explain the technical rationale.`;
+    preferredStructure = "Sentence 1: Direct validation/refutation of the premise. Sentence 2-3: Core SEO principles and why the premise is flawed or conditional. Sentence 4: Correct approach.";
+  }
+
   // Tailor directives if context is resolved for a short follow-up
   if (isContextResolved && followUpContext) {
     switch (followUpContext.followUpType) {

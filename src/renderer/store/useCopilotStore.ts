@@ -642,6 +642,10 @@ function commitQuestion(
     finalTurnId
   );
 
+  if (followUpContext.contextResolved && followUpContext.inheritedIntent) {
+    finalIntent.category = followUpContext.inheritedIntent;
+  }
+
   const finalContract = buildAnswerContract({
     question: correctedText,
     intent: finalIntent,

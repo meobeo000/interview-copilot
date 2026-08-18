@@ -17,3 +17,4 @@ service-account*.json
 google-credentials*.json
 *.p12
 *.pem
+live_session_telemetry*.json

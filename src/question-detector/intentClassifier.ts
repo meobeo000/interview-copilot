@@ -152,6 +152,15 @@ function extractDomainComparisonSignals(text: string, state?: SemanticEvidenceSt
     return { score: 0, tokens: [], breakdown: {} };
   }
 
+  // If question is about Guest Post / Link outreach without domain options, DO NOT classify as DOMAIN_SELECTION
+  const isGuestPostTopic = Boolean(
+    text.match(/\b(guest post|guestpost|gét pót|báo pr|link báo|outreach|site đi guest post)\b/i) &&
+    !text.match(/\b(domain a|domain b|site a|site b|con a|con b|expired domain|domain cũ|tên miền cũ)\b/i)
+  );
+  if (isGuestPostTopic) {
+    return { score: 0, tokens: [], breakdown: {} };
+  }
+
   // Domain comparison entities (con A, con B, domain A, domain B, site A, site B, giữa con ... và con ...)
   const comparisonMatches = matchUnicodePattern(
     text,
@@ -168,7 +177,7 @@ function extractDomainComparisonSignals(text: string, state?: SemanticEvidenceSt
   // Domain decision / hunting / competitor / purchase language
   const decisionMatches = matchUnicodePattern(
     text,
-    "chọn\\s+con\\s+nào|ưu\\s+tiên\\s+con\\s+nào|ưu\\s+tiên\\s+domain\\s+nào|lấy\\s+không|có\\s+lấy\\s+không|có\\s+mua\\s+không|nên\\s+mua|lấy\\s+con\\s+nào|chọn\\s+domain\\s+nào|chọn\\s+site\\s+nào|tiêu\\s+chí\\s+săn\\s+domain|săn\\s+domain|tiêu\\s+chí\\s+săn\\s+expired\\s+domain|săn\\s+expired\\s+domain|tiêu\\s+chí\\s+chọn\\s+domain|mua\\s+expired\\s+domain|chọn\\s+expired\\s+domain|domain\\s+a\\s+hay\\s+domain\\s+b|con\\s+a\\s+hay\\s+con\\s+b|site\\s+a\\s+hay\\s+site\\s+b|trước\\s+khi\\s+mua|mua\\s+không|check\\s+referring\\s+domain|backlink\\s+profile\\s+của\\s+đối\\s+thủ"
+    "chọn\\s+con\\s+nào|ưu\\s+tiên\\s+con\\s+nào|ưu\\s+tiên\\s+domain\\s+nào|lấy\\s+không|có\\s+lấy\\s+không|có\\s+mua\\s+không|nên\\s+mua|lấy\\s+con\\s+nào|chọn\\s+domain\\s+nào|chọn\\s+site\\s+nào|tiêu\\s+chí\\s+săn\\s+domain|săn\\s+domain|tiêu\\s+chí\\s+săn\\s+expired\\s+domain|săn\\s+expired\\s+domain|tiêu\\s+chí\\s+chọn\\s+domain|mua\\s+expired\\s+domain|chọn\\s+expired\\s+domain|domain\\s+a\\s+hay\\s+domain\\s+b|con\\s+a\\s+hay\\s+con\\s+b|site\\s+a\\s+hay\\s+site\\s+b|check\\s+referring\\s+domain|backlink\\s+profile\\s+của\\s+đối\\s+thủ"
   );
   if (decisionMatches) {
     breakdown.decisionLanguage = 7;
@@ -214,16 +223,17 @@ function extractIndexingSignals(text: string, state?: SemanticEvidenceState): Si
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
-  // Bot opening / crawl signals - ensure not negated ("không có lỗi crawl")
-  const negCrawl = isConceptNegated(text, ["crawl", "index", "bot", "lỗi crawl", "lỗi index"]);
-  const botMatches = !negCrawl.isNegated ? text.match(/\b(mở bot|mở cổng|crawl bot|bật index|mở index|crawl|crawl đều|cắn index|đã cắn index|đã index)\b/gi) : null;
-  if (botMatches) {
-    breakdown.botActivity = 6;
-    tokens.push(...botMatches);
+  // Exclude architecture / internal linking optimization (e.g. "tối ưu bot crawl và truyền link equity") without symptoms
+  const isArchitectureWorkflow = Boolean(
+    text.match(/\b(cấu trúc silo|internal link|truyền link equity|silo|internal links)\b/i) &&
+    !text.match(/\b(chưa nhận|không nhận|mãi không|vẫn chưa|kẹt ở top|lẹt đẹt|chưa vào top|chưa cắn)\b/i)
+  );
+  if (isArchitectureWorkflow) {
+    return { score: 0, tokens: [], breakdown: {} };
   }
 
   // Keyword reception status or stuck in low positions (top 30-50, chưa vào top 10/50)
-  const keySignalMatches = text.match(/\b(chưa nhận|không nhận|mãi không|vẫn chưa|chưa lên|không lên|không có)\s+(keyword|key word|key|cây|từ khóa|traffic|ranking|từ khóa nào)\b/gi);
+  const keySignalMatches = text.match(/\b(chưa nhận|không nhận|mãi không|vẫn chưa|chưa lên|không lên|không có)\s+(keyword|key word|key|cây|từ khóa|traffic|ranking|từ khóa nào|impression)\b/gi);
   if (keySignalMatches) {
     breakdown.noKeywordEvidence = 8;
     tokens.push(...keySignalMatches);
@@ -232,13 +242,25 @@ function extractIndexingSignals(text: string, state?: SemanticEvidenceState): Si
     tokens.push("chưa nhận key");
   }
 
-  // Weak rank with impressions (e.g. "có impression nhưng ranking top 40", "kẹt ở top 30-50", "chưa vào top 50", "lẹt đẹt top 40")
+  // Weak rank with impressions (e.g. "có impression nhưng ranking top 40", "kẹt ở top 30-50", "chưa vào top 50", "lẹt đẹt top 40", "chưa vào top 10")
   const weakRankMatches = text.match(/\b(chưa vào top\s*(?:10|20|30|40|50|100)|kẹt ở top\s*(?:10|20|30|40|50|\d{2})|lẹt đẹt top\s*(?:10|20|30|40|50|\d{2})|top\s*(?:30|40|50|\d{2})\b.*\b(?:lẹt đẹt|kẹt))\b/i) ||
     text.match(/\b(có impression|nhận impression|impression tăng)\b.*\b(top\s*(?:30|40|50|\d{2})|thứ hạng thấp|chưa vào top|kẹt ở top|lẹt đẹt)\b/i) ||
-    text.match(/\b(top\s*(?:30|40|50|\d{2})|lẹt đẹt)\b.*\b(có impression|nhận impression|đã index|sau \d+ tuần)\b/i);
+    text.match(/\b(top\s*(?:30|40|50|\d{2})|lẹt đẹt)\b.*\b(có impression|nhận impression|đã index|sau \d+ tuần)\b/i) ||
+    text.match(/\btop\s*\d+\s*(?:nhưng|chưa)\s*vào\s*top\s*(?:10|20|50)\b/i);
   if (weakRankMatches) {
     breakdown.weakRankImpression = 9;
     tokens.push(weakRankMatches[0]);
+  }
+
+  // Explicit bot opening / crawl signals with timeframe or missing impression inquiry
+  const negCrawl = isConceptNegated(text, ["crawl", "index", "bot", "lỗi crawl", "lỗi index"]);
+  if (!negCrawl.isNegated) {
+    const botOpeningWithTimeframe = text.match(/\b(mở bot|mở cổng|bật index|mở index)\b.*\b(\d+\s*(?:ngày|tuần)|mười ngày|hai tuần|chưa có|chưa cắn|chưa nhận)\b/i) ||
+      text.match(/\b(\d+\s*(?:ngày|tuần)|mười ngày|hai tuần)\b.*\b(mở bot|mở cổng|bật index|mở index)\b/i);
+    if (botOpeningWithTimeframe) {
+      breakdown.botActivity = 7;
+      tokens.push(botOpeningWithTimeframe[0]);
+    }
   }
 
   // Duration indicators
@@ -251,8 +273,8 @@ function extractIndexingSignals(text: string, state?: SemanticEvidenceState): Si
     tokens.push(...state.durations);
   }
 
-  // Require noKeywordEvidence or botActivity or weakRankImpression
-  if (!breakdown.noKeywordEvidence && !breakdown.botActivity && !breakdown.weakRankImpression && !(state && state.indexingSignals.length > 0)) {
+  // Require noKeywordEvidence or weakRankImpression or explicit botActivity inquiry
+  if (!breakdown.noKeywordEvidence && !breakdown.weakRankImpression && !breakdown.botActivity && !(state && state.indexingSignals.length > 0)) {
     return { score: 0, tokens: [], breakdown: {} };
   }
 
@@ -416,14 +438,33 @@ function extractOnpageDiagnosisSignals(text: string): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
-  // Cannibalization & competing landing pages
-  const cannibalizationMatches = text.match(/\b(cannibalization|ăn thịt từ khóa|ăn thịt keyword|cùng rank|cạnh tranh lẫn nhau|trùng lặp intent|nhận nhầm url|2 url cùng|hai landing page|hai bài cùng)\b/gi);
-  if (cannibalizationMatches) {
-    breakdown.cannibalization = 10;
-    tokens.push(...cannibalizationMatches);
+  // Cannibalization & competing landing pages - ensure not negated ("không phải do cannibalization")
+  const negCannibal = isConceptNegated(text, ["cannibalization", "ăn thịt từ khóa", "ăn thịt keyword", "cùng rank", "trùng lặp intent"]);
+  if (!negCannibal.isNegated) {
+    const cannibalizationMatches = text.match(/\b(cannibalization|ăn thịt từ khóa|ăn thịt keyword|cùng rank|cạnh tranh lẫn nhau|trùng lặp intent|nhận nhầm url|2 url cùng|hai landing page|hai bài cùng)\b/gi);
+    if (cannibalizationMatches) {
+      breakdown.cannibalization = 10;
+      tokens.push(...cannibalizationMatches);
+    }
   }
 
-  const onpageMatches = text.match(/\b(onpage|on-page|on page|onpage trước|on-page trước)\b/gi);
+  // Explicit concrete technical defects (canonical loop, stale sitemap, robots block, redirect loop, duplicate content)
+  const negTechnical = isConceptNegated(text, ["canonical", "lỗi canonical", "sitemap", "robots", "onpage", "on-page"]);
+  if (!negTechnical.isNegated) {
+    const defectMatches = text.match(/\b(lỗi canonical|canonical trỏ vòng tròn|canonical vòng tròn|sai canonical|canonical loop|sitemap không update|sitemap lỗi|lỗi sitemap|sitemap không cập nhật|chặn robots|lỗi robots|redirect loop|vòng lặp redirect|trùng lặp nội dung|duplicate content|thin content)\b/gi);
+    if (defectMatches) {
+      breakdown.concreteTechnicalDefect = 12;
+      tokens.push(...defectMatches);
+    }
+
+    const technicalElements = text.match(/\b(canonical|làm sai canonical|schema|heading|sitemap|robots\.txt|sapo|meta title|meta description|thay đổi title|title heading)\b/gi);
+    if (technicalElements) {
+      breakdown.technicalAudit = 6;
+      tokens.push(...technicalElements);
+    }
+  }
+
+  const onpageMatches = !negTechnical.isNegated ? text.match(/\b(onpage|on-page|on page|onpage trước|on-page trước)\b/gi) : null;
   if (onpageMatches) {
     breakdown.onpageLexical = 5;
     tokens.push(...onpageMatches);
@@ -435,13 +476,7 @@ function extractOnpageDiagnosisSignals(text: string): SignalExtractionResult {
     tokens.push(...toolCompare);
   }
 
-  const technicalElements = text.match(/\b(canonical|làm sai canonical|schema|heading|sitemap|robots\.txt|sapo|meta title|meta description|thay đổi title)\b/gi);
-  if (technicalElements) {
-    breakdown.technicalAudit = 5;
-    tokens.push(...technicalElements);
-  }
-
-  if (!breakdown.cannibalization && !breakdown.onpageLexical && !breakdown.diagnosticOrder && !breakdown.technicalAudit) {
+  if (!breakdown.cannibalization && !breakdown.concreteTechnicalDefect && !breakdown.onpageLexical && !breakdown.diagnosticOrder && !breakdown.technicalAudit) {
     return { score: 0, tokens: [], breakdown: {} };
   }
 
@@ -453,15 +488,16 @@ function extractProjectExperienceSignals(text: string): SignalExtractionResult {
   const breakdown: Record<string, number> = {};
   const tokens: string[] = [];
 
-  const expMatches = text.match(/\b(dự án|project|case study|kinh nghiệm)\b.+\b(gần nhất|từng làm|làm là|đã làm|thành công|trực tiếp làm)\b/gi);
+  const expMatches = text.match(/\b(dự án|project|case study|kinh nghiệm|trực tiếp vận hành|từng vận hành|đã trực tiếp|kinh nghiệm thực chiến|kinh nghiệm triển khai)\b.+\b(gần nhất|từng làm|làm là|đã làm|thành công|trực tiếp làm|nào trước đây|ở đâu)\b/gi) ||
+    text.match(/\b(em đã trực tiếp|em từng trực tiếp|kinh nghiệm của em|kinh nghiệm thực tế)\b/gi);
   if (expMatches) {
     breakdown.projectExperience = 8;
     tokens.push(...expMatches);
   }
 
-  const nicheMatches = text.match(/\b(làm qua|từng làm|trực tiếp làm)\b.+\b(igaming|casino|betting|crypto|site|dự án)\b/gi);
+  const nicheMatches = text.match(/\b(làm qua|từng làm|trực tiếp làm|trực tiếp vận hành|từng vận hành)\b.+\b(igaming|casino|betting|crypto|site|dự án|pbn|nhà cái)\b/gi);
   if (nicheMatches) {
-    breakdown.nicheProject = 7;
+    breakdown.nicheProject = 8;
     tokens.push(...nicheMatches);
   }
 
@@ -504,7 +540,7 @@ function extractStrategyPlanSignals(text: string, state?: SemanticEvidenceState)
     tokens.push(...rankingMaintenance);
   }
 
-  const strategyMatches = text.match(/\b(internal link|internal links|money page|anchor text|an co text|an co teck|an co|anchor brand|anchor|exact match|cấu trúc silo|topic cluster|kế hoạch|chiến lược|tiêu chí chọn site|outreach|en ti ti|entity|gét pót|guest post|content|link nền|referring domain)\b/gi);
+  const strategyMatches = text.match(/\b(internal link|internal links|money page|anchor text|an co text|an co teck|an co|anchor brand|anchor|exact match|cấu trúc silo|topic cluster|kế hoạch|chiến lược|tiêu chí chọn site|outreach|en ti ti|entity|gét pót|guest post|content|link nền|referring domain|backlink|backlinks)\b/gi);
   if (strategyMatches) {
     breakdown.strategyConcepts = strategyMatches.length * 4;
     tokens.push(...strategyMatches);
@@ -513,7 +549,7 @@ function extractStrategyPlanSignals(text: string, state?: SemanticEvidenceState)
     tokens.push(...state.seoEntities);
   }
 
-  const actionMatches = text.match(/\b(đi link|xây dựng link|triển khai link|tối ưu internal link|đẩy link|build en ti ti|build entity|chọn site đi|triển khai|triển khai thế nào|thứ tự triển khai|làm gì từ đầu)\b/gi);
+  const actionMatches = text.match(/\b(đi link|xây dựng link|triển khai link|tối ưu internal link|đẩy link|build en ti ti|build entity|chọn site đi|triển khai|triển khai thế nào|thứ tự triển khai|làm gì từ đầu|xử lý sao|xử lý thế nào|xử lý ra sao|xử lý như thế nào)\b/gi);
   if (actionMatches) {
     breakdown.linkTactic = 5;
     tokens.push(...actionMatches);
@@ -748,7 +784,7 @@ export function classifyQuestionIntent(
         (s.totalScore >= 7 ||
           (s.category === "BUDGET_ALLOCATION" && (s.signals.money !== undefined || s.signals.budgetLexical !== undefined || s.signals.anchorAllocation !== undefined)) ||
           (s.category === "PBN_TIMING" && s.signals.pbnTarget !== undefined && s.signals.timingInquiry !== undefined) ||
-          (s.category === "ONPAGE_DIAGNOSIS" && s.signals.cannibalization !== undefined) ||
+          (s.category === "ONPAGE_DIAGNOSIS" && (s.signals.cannibalization !== undefined || s.signals.concreteTechnicalDefect !== undefined || s.signals.technicalAudit !== undefined)) ||
           (s.category === "NO_KEYWORD_SIGNAL" && (s.signals.weakRankImpression !== undefined || s.signals.noKeywordEvidence !== undefined)) ||
           (s.category === "GSC_RANKING_DROP" && s.signals.metricDrop !== undefined))
     );
@@ -757,12 +793,18 @@ export function classifyQuestionIntent(
     }
   }
 
-  // Precedence: NO_KEYWORD_SIGNAL beats general ONPAGE_DIAGNOSIS when weak rank/indexing is primary and cannibalization is not present
+  // Precedence: Concrete technical defects in ONPAGE_DIAGNOSIS beat generic STRATEGY_PLAN
+  const onpageCandidate = scores.find((s) => s.category === "ONPAGE_DIAGNOSIS");
+  if (onpageCandidate && (onpageCandidate.signals.concreteTechnicalDefect !== undefined || onpageCandidate.signals.cannibalization !== undefined)) {
+    topCandidate = onpageCandidate;
+  }
+
+  // Precedence: NO_KEYWORD_SIGNAL beats general ONPAGE_DIAGNOSIS when weak rank/indexing is primary and cannibalization/concrete defects are not present
   if (topCandidate && topCandidate.category === "ONPAGE_DIAGNOSIS") {
     const indexingCandidate = scores.find(
       (s) => s.category === "NO_KEYWORD_SIGNAL" && (s.signals.weakRankImpression !== undefined || s.signals.noKeywordEvidence !== undefined)
     );
-    if (indexingCandidate && !topCandidate.signals.cannibalization) {
+    if (indexingCandidate && !topCandidate.signals.cannibalization && !topCandidate.signals.concreteTechnicalDefect) {
       topCandidate = indexingCandidate;
     }
   }
@@ -790,11 +832,14 @@ export function classifyQuestionIntent(
   // If GSC_RANKING_DROP or ONPAGE_DIAGNOSIS has strong score, it beats false DOMAIN_SELECTION triggered by tools
   if (topCandidate && topCandidate.category === "DOMAIN_SELECTION") {
     const dropCandidate = scores.find((s) => s.category === "GSC_RANKING_DROP" && s.totalScore >= 7 && !topCandidate.signals.decisionLanguage);
-    const onpageCandidate = scores.find((s) => s.category === "ONPAGE_DIAGNOSIS" && s.totalScore >= 7 && !topCandidate.signals.decisionLanguage);
+    const onpageScore = scores.find((s) => s.category === "ONPAGE_DIAGNOSIS" && s.totalScore >= 7 && !topCandidate.signals.decisionLanguage);
+    const stratCandidate = scores.find((s) => s.category === "STRATEGY_PLAN" && (text.includes("guest post") || text.includes("outreach")));
     if (dropCandidate) {
       topCandidate = dropCandidate;
-    } else if (onpageCandidate) {
-      topCandidate = onpageCandidate;
+    } else if (onpageScore) {
+      topCandidate = onpageScore;
+    } else if (stratCandidate) {
+      topCandidate = stratCandidate;
     }
   }
 

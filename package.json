@@ -18,6 +18,7 @@
     "diagnostic:pipeline-correctness": "npx tsx src/diagnostics/pipelineCorrectnessDiagnostic.ts",
     "diagnostic:follow-up-context": "npx tsx src/diagnostics/followUpContextDiagnostic.ts",
     "diagnostic:intent-routing": "npx tsx src/diagnostics/intentRoutingDiagnostic.ts",
+    "diagnostic:live-gate": "npx tsx src/diagnostics/liveSessionGateDiagnostic.ts",
     "test": "vitest run",
     "build": "tsc -p tsconfig.node.json && vite build"
   },
