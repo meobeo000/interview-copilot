@@ -24,6 +24,7 @@ import type { TranscriptionService } from "../../transcription/types";
 import { parseStreamingAnswer } from "../../llm/parseAnswerJson";
 import { type CandidateProfile, loadCandidateProfile, saveCandidateProfile } from "../../shared/candidateProfile";
 import { buildAnswerContract, isContractCompatible, type AnswerContract } from "../../llm/answerContract";
+import { buildSafeFallbackAnswer } from "../../llm/fallbackAnswerBuilder";
 import {
   InterviewTurnContextManager,
   type InterviewTurnContext
@@ -78,6 +79,9 @@ function applyDelta(answer: SuggestedAnswer, delta: AnswerDelta): SuggestedAnswe
       bullets: delta.answer.bullets,
       keywords: delta.answer.keywords,
       confidence: delta.answer.confidence,
+      providerStatus: delta.answer.providerStatus || answer.providerStatus,
+      answerSource: delta.answer.answerSource || answer.answerSource,
+      fallbackReason: delta.answer.fallbackReason || answer.fallbackReason,
       streamingText: undefined
     };
   }
@@ -139,7 +143,7 @@ export interface CopilotState {
   updateProfile: (profile: CandidateProfile) => void;
   toggleContentProtection: () => Promise<void>;
   regenerateAnswer: () => Promise<void>;
-  triggerDirectQuestion?: (questionText: string) => Promise<void>;
+  triggerDirectQuestion: (questionText: string) => Promise<void>;
   triggerDevDirectQuestion: (questionText?: string) => Promise<void>;
   hideOverlay: () => Promise<void>;
 }
@@ -925,16 +929,21 @@ async function streamAnswerForItem(
   };
 
   let hasError = false;
-  try {
-    const contract =
-      item.contract ||
-      buildAnswerContract({
-        question: item.cleanedQuestion ?? item.rawTranscript,
-        intent: item.intent,
-        candidateProfile: get().candidateProfile,
-        followUpContext: item.followUpContext
-      });
+  let receivedAnyUsefulAnswer = false;
+  let errorDetail = "";
+  let providerStatus: "SUCCESS" | "RATE_LIMIT" | "TIMEOUT" | "NETWORK_ERROR" | "STREAM_ERROR" = "SUCCESS";
+  let answerSource: "GEMINI" | "SAFE_FALLBACK" = "GEMINI";
 
+  const contract =
+    item.contract ||
+    buildAnswerContract({
+      question: item.cleanedQuestion ?? item.rawTranscript,
+      intent: item.intent,
+      candidateProfile: get().candidateProfile,
+      followUpContext: item.followUpContext
+    });
+
+  try {
     const generator = answerService.streamAnswer({
       questionId: item.id,
       question: item.cleanedQuestion ?? item.rawTranscript,
@@ -967,6 +976,7 @@ async function streamAnswerForItem(
         const useful = extractFirstUsefulAnswer(nextAnswer);
         if (useful) {
           timestamps.firstUsefulAnswerAt = Date.now();
+          receivedAnyUsefulAnswer = true;
         }
       }
 
@@ -974,23 +984,69 @@ async function streamAnswerForItem(
     }
   } catch (error) {
     hasError = true;
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    if (activeItem?.id === item.id) {
-      set({
-        status: "Error",
-        error: `Answer generation failed: ${errorMsg}`
+    errorDetail = error instanceof Error ? error.message : String(error);
+    const errLower = errorDetail.toLowerCase();
+    if (errLower.includes("429") || errLower.includes("quota")) {
+      providerStatus = "RATE_LIMIT";
+    } else if (errLower.includes("timeout") || errLower.includes("timed out")) {
+      providerStatus = "TIMEOUT";
+    } else if (errLower.includes("stream") || errLower.includes("cancelled")) {
+      providerStatus = "STREAM_ERROR";
+    } else {
+      providerStatus = "NETWORK_ERROR";
+    }
+
+    // Task 4: Partial Stream Safety Policy:
+    // If NO meaningful answer was exposed yet, invoke SAFE_FALLBACK so UI renders safe grounded answer
+    if (!receivedAnyUsefulAnswer) {
+      answerSource = "SAFE_FALLBACK";
+      const fallback = buildSafeFallbackAnswer({
+        contract,
+        question: item.cleanedQuestion ?? item.rawTranscript,
+        failureType: providerStatus,
+        errorDetail
       });
+      nextAnswer = {
+        ...fallback,
+        providerStatus,
+        answerSource,
+        fallbackReason: errorDetail
+      };
+      timestamps.firstVisibleAnswerAt ??= Date.now();
+      timestamps.firstUsefulAnswerAt ??= Date.now();
+      timestamps.answerCompletedAt = Date.now();
+
+      if (activeItem?.id === item.id) {
+        set({
+          answer: nextAnswer,
+          status: "Answering"
+        });
+      }
+    } else {
+      // If meaningful answer was already exposed, preserve it without appending conflicting text
+      nextAnswer = {
+        ...nextAnswer,
+        providerStatus,
+        answerSource: "GEMINI",
+        fallbackReason: errorDetail
+      };
     }
   }
 
-  if (hasError) {
-    if (correctedTurnSpeechBuffer.trim()) {
-      evaluateAccumulatedTurn(set, get);
-    }
-    return;
-  }
+  const updatedItem: ConversationItem = {
+    ...item,
+    answer: nextAnswer,
+    providerStatus: nextAnswer.providerStatus || providerStatus,
+    answerSource: nextAnswer.answerSource || answerSource,
+    fallbackReason: nextAnswer.fallbackReason || errorDetail || undefined,
+    timestamps
+  };
 
-  finalizeCommittedItem({ ...item, timestamps }, nextAnswer, set, get);
+  finalizeCommittedItem(updatedItem, nextAnswer, set, get);
+
+  if (hasError && correctedTurnSpeechBuffer.trim()) {
+    evaluateAccumulatedTurn(set, get);
+  }
 }
 
 export const useCopilotStore = create<CopilotState>((set, get) => ({
@@ -1256,7 +1312,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     await streamAnswerForItem(newItem, set, get);
   },
   hideOverlay: async () => {
-    if (window.copilotWindow) {
+    if (window.copilotWindow?.hide) {
       await window.copilotWindow.hide();
     }
   }

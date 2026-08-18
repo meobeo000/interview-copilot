@@ -27,6 +27,9 @@ export interface ConversationItem {
   contract?: import("../llm/answerContract").AnswerContract;
   followUpContext?: import("../question-detector/interviewTurnContext").ResolvedFollowUpContext;
   timestamps?: PipelineTimestamps;
+  providerStatus?: "SUCCESS" | "RATE_LIMIT" | "TIMEOUT" | "NETWORK_ERROR" | "STREAM_ERROR";
+  answerSource?: "GEMINI" | "SAFE_FALLBACK";
+  fallbackReason?: string;
 }
 
 export interface SuggestedAnswer {
@@ -35,6 +38,9 @@ export interface SuggestedAnswer {
   keywords: string[];
   confidence?: number;
   streamingText?: string;
+  providerStatus?: "SUCCESS" | "RATE_LIMIT" | "TIMEOUT" | "NETWORK_ERROR" | "STREAM_ERROR";
+  answerSource?: "GEMINI" | "SAFE_FALLBACK";
+  fallbackReason?: string;
 }
 
 export interface QuestionDetectionResult {

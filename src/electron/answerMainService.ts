@@ -3,11 +3,15 @@ import { createAnswerService } from "../llm/factory";
 import type { AnswerRequest, AnswerService } from "../llm/types";
 import type { SuggestedAnswer } from "../shared/types";
 import { AnswerTraceLogger } from "../shared/answerTrace";
+import { buildAnswerContract } from "../llm/answerContract";
+import { buildSafeFallbackAnswer } from "../llm/fallbackAnswerBuilder";
 
 export class AnswerMainService {
   private activeAnswerService: AnswerService | undefined;
   private activeQuestionId: string | undefined;
   private activeAbortController: AbortController | undefined;
+
+  constructor(private serviceFactory: (env?: Record<string, string | undefined>) => AnswerService = createAnswerService) {}
 
   async generateAnswer(window: BrowserWindow, request: AnswerRequest): Promise<void> {
     // 1. If an active generation is in flight, abort it cleanly via AbortController
@@ -18,7 +22,7 @@ export class AnswerMainService {
 
     this.activeQuestionId = request.questionId;
     this.activeAbortController = new AbortController();
-    this.activeAnswerService = createAnswerService(process.env);
+    this.activeAnswerService = this.serviceFactory(process.env);
 
     const provider = this.activeAnswerService.providerName;
     const model = this.activeAnswerService.modelName;
@@ -97,10 +101,62 @@ export class AnswerMainService {
       console.error(`[ANSWER ERROR] ${provider}/${model} failed for ${request.questionId}:`, errorMsg);
 
       if (this.activeQuestionId === request.questionId) {
-        window.webContents.send("answer:error", {
-          questionId: request.questionId,
-          error: `Gemini không trả về câu trả lời (${errorMsg})`
-        });
+        let providerStatus: "RATE_LIMIT" | "TIMEOUT" | "NETWORK_ERROR" | "STREAM_ERROR" = "NETWORK_ERROR";
+        const errLower = errorMsg.toLowerCase();
+        if (errLower.includes("429") || errLower.includes("quota")) {
+          providerStatus = "RATE_LIMIT";
+        } else if (errLower.includes("timeout") || errLower.includes("timed out")) {
+          providerStatus = "TIMEOUT";
+        } else if (errLower.includes("stream") || errLower.includes("cancelled")) {
+          providerStatus = "STREAM_ERROR";
+        }
+
+        // If no meaningful answer was sent yet, emit safe fallback answer to window
+        if (!lastAccumulatedText.trim() && !finalAnswer) {
+          const contract =
+            request.contract ||
+            buildAnswerContract({
+              question: request.question,
+              intent: request.intent,
+              candidateProfile: request.profile,
+              followUpContext: request.followUpContext
+            });
+
+          const fallback = buildSafeFallbackAnswer({
+            contract,
+            question: request.question,
+            failureType: providerStatus,
+            errorDetail: errorMsg
+          });
+
+          const payloadAnswer: SuggestedAnswer = {
+            ...fallback,
+            providerStatus,
+            answerSource: "SAFE_FALLBACK",
+            fallbackReason: errorMsg
+          };
+
+          window.webContents.send("answer:complete", {
+            questionId: request.questionId,
+            answer: payloadAnswer
+          });
+        } else {
+          // If partial text already arrived, send existing partial with error metadata
+          const payloadAnswer: SuggestedAnswer = finalAnswer || {
+            openingLine: lastAccumulatedText.trim(),
+            bullets: [],
+            keywords: ["SEO"],
+            confidence: 0.8,
+            providerStatus,
+            answerSource: "GEMINI",
+            fallbackReason: errorMsg
+          };
+
+          window.webContents.send("answer:complete", {
+            questionId: request.questionId,
+            answer: payloadAnswer
+          });
+        }
       }
     } finally {
       if (this.activeQuestionId === request.questionId) {

@@ -1,22 +1,35 @@
 import type { CandidateProfile } from "../shared/candidateProfile";
 import type { KnowledgeChunk } from "./types";
-import type { QuestionIntent } from "../question-detector/intentClassifier";
+import type { QuestionIntent, QuestionIntentCategory } from "../question-detector/intentClassifier";
+import type { QuestionShape, QuestionShapeResult } from "../question-detector/questionShapeClassifier";
+import type { ResolvedFollowUpContext } from "../question-detector/interviewTurnContext";
+import type { ScenarioConstraints } from "../question-detector/scenarioConstraints";
+import {
+  type PractitionerInterviewReference
+} from "./practitionerInterviewReference";
+import { getPractitionerReferenceRetriever } from "./practitionerReferenceRetriever";
 
 export interface ContextBuilderOptions {
   question: string;
-  intent?: QuestionIntent | string;
+  intent?: QuestionIntent | QuestionIntentCategory | string;
+  questionShape?: QuestionShape | QuestionShapeResult;
   candidateProfile?: CandidateProfile;
-  retrievedChunks: KnowledgeChunk[];
+  retrievedChunks?: KnowledgeChunk[];
+  practitionerReferences?: PractitionerInterviewReference[];
+  followUpContext?: ResolvedFollowUpContext;
+  scenarioConstraints?: ScenarioConstraints;
+  entities?: string[];
+  numericFacts?: string[];
 }
 
 export function buildAnswerKnowledgeContext(options: ContextBuilderOptions): string {
-  const { candidateProfile, retrievedChunks } = options;
+  const { candidateProfile, retrievedChunks = [] } = options;
 
   const candidateFacts: string[] = [];
-  const practitionerInsights: string[] = [];
+  const practitionerLines: string[] = [];
   const generalNotes: string[] = [];
 
-  // 1. Candidate facts from profile
+  // 1. Candidate facts from verified profile
   if (candidateProfile) {
     if (candidateProfile.background) {
       candidateFacts.push(`- Background: ${candidateProfile.background}`);
@@ -37,6 +50,7 @@ export function buildAnswerKnowledgeContext(options: ContextBuilderOptions): str
   }
 
   // 2. Chunks partitioning
+  const legacyPractitionerChunks: KnowledgeChunk[] = [];
   for (const chunk of retrievedChunks) {
     if (chunk.sourceType === "candidate_profile") {
       const factLine = `- [Cá nhân] ${chunk.title ? `${chunk.title}: ` : ""}${chunk.content}`;
@@ -44,11 +58,46 @@ export function buildAnswerKnowledgeContext(options: ContextBuilderOptions): str
         candidateFacts.push(factLine);
       }
     } else if (chunk.sourceType === "practitioner_playbook") {
-      practitionerInsights.push(
-        `- [Kinh nghiệm Practitioner - Tham khảo]: ${chunk.title ? `[${chunk.title}] ` : ""}${chunk.content}`
-      );
-    } else {
+      legacyPractitionerChunks.push(chunk);
+    } else if (chunk.sourceType === "general_note") {
       generalNotes.push(`- [Nguyên lý chung]: ${chunk.content}`);
+    }
+  }
+
+  // 3. Practitioner references
+  let practitionerRefs = options.practitionerReferences;
+  if (!practitionerRefs && legacyPractitionerChunks.length === 0) {
+    const retrieval = getPractitionerReferenceRetriever().retrieve({
+      question: options.question,
+      intent: options.intent,
+      questionShape: options.questionShape,
+      entities: options.entities,
+      followUpContext: options.followUpContext,
+      scenarioConstraints: options.scenarioConstraints,
+      numericFacts: options.numericFacts,
+      maxReferences: 2
+    });
+    practitionerRefs = retrieval.references;
+  }
+
+  // Build Practitioner Section
+  practitionerLines.push("PRACTITIONER PLAYBOOK (Reference Strategy Inspiration - NOT Personal History):");
+  practitionerLines.push("- [PRACTITIONER INTERVIEW REFERENCE - GROUNDING INSTRUCTIONS]:");
+  practitionerLines.push("  * Guidance is reference pattern only; do NOT copy mechanically or convert examples to universal rules.");
+  practitionerLines.push("  * NEVER claim 'Ở dự án UU88 em đã...' unless verified in candidate facts.");
+
+  if (legacyPractitionerChunks.length > 0) {
+    for (const chunk of legacyPractitionerChunks) {
+      practitionerLines.push(`- [Kinh nghiệm Practitioner - Tham khảo]: ${chunk.title ? `[${chunk.title}] ` : ""}${chunk.content}`);
+    }
+  }
+
+  if (practitionerRefs && practitionerRefs.length > 0) {
+    for (const ref of practitionerRefs) {
+      const gSummary = ref.guidance.slice(0, 2).join("; ");
+      const exSummary = ref.practitionerExamples?.[0] ? ` [Ví dụ: ${ref.practitionerExamples[0]}]` : "";
+      const cautionSummary = ref.cautions?.[0] ? ` [Lưu ý: ${ref.cautions[0]}]` : "";
+      practitionerLines.push(`- [Practitioner Reference: ${ref.id}]: ${gSummary}${exSummary}${cautionSummary}`);
     }
   }
 
@@ -56,20 +105,23 @@ export function buildAnswerKnowledgeContext(options: ContextBuilderOptions): str
 
   sections.push("[KNOWLEDGE GROUNDING & SAFETY BOUNDARIES]:");
 
+  // SECTION A: VERIFIED CANDIDATE FACTS (Highest Priority)
+  sections.push("CANDIDATE PERSONAL FACTS (Factual Grounding - Highest Priority):");
   if (candidateFacts.length > 0) {
-    sections.push("CANDIDATE PERSONAL FACTS (Factual Grounding):\n" + candidateFacts.join("\n"));
+    sections.push(candidateFacts.join("\n"));
   } else {
-    sections.push("CANDIDATE PERSONAL FACTS:\n- Ứng viên có nền tảng Web Development vững chắc, tư duy Technical SEO tốt, đang học hỏi & tích lũy thực chiến SEO iGaming.");
+    sections.push("- Ứng viên có nền tảng Web Development vững chắc, tư duy Technical SEO tốt, đang học hỏi & tích lũy thực chiến SEO iGaming.");
   }
 
-  if (practitionerInsights.length > 0) {
-    sections.push("PRACTITIONER PLAYBOOK (Reference Strategy Inspiration - NOT Personal History):\n" + practitionerInsights.join("\n"));
-  }
+  // SECTION B: PRACTITIONER INTERVIEW REFERENCE (Second Priority)
+  sections.push(practitionerLines.join("\n"));
 
+  // SECTION C: GENERAL SEO PRINCIPLES (Base Priority)
   if (generalNotes.length > 0) {
     sections.push("GENERAL SEO PRINCIPLES:\n" + generalNotes.join("\n"));
   }
 
+  // STRICT GROUNDING RULES
   sections.push(`
 STRICT GROUNDING RULES:
 1. Candidate facts may be spoken as personal background ("em", "nền tảng của em...").

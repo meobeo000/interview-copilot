@@ -57,17 +57,6 @@ export class GeminiAnswerService implements AnswerService {
       : getKnowledgeRetriever().retrieve(request.question, request.intent);
     const retrievalElapsedMs = Math.max(0, Date.now() - retrievalStart);
 
-    const contextBuildStart = Date.now();
-    const knowledgeContext =
-      request.knowledgeContext ||
-      buildAnswerKnowledgeContext({
-        question: request.question,
-        intent: request.intent,
-        candidateProfile: request.profile,
-        retrievedChunks: retrieved.chunks
-      });
-    const contextBuildElapsedMs = Math.max(0, Date.now() - contextBuildStart);
-
     // 1. Build AnswerContract describing WHAT Gemini must answer (< 5ms)
     const contract =
       request.contract ||
@@ -79,6 +68,21 @@ export class GeminiAnswerService implements AnswerService {
         candidateProfile: request.profile,
         followUpContext: request.followUpContext
       });
+
+    const contextBuildStart = Date.now();
+    const knowledgeContext =
+      request.knowledgeContext ||
+      buildAnswerKnowledgeContext({
+        question: request.question,
+        intent: request.intent || contract.intent,
+        entities: contract.requiredEntities,
+        numericFacts: contract.requiredFacts,
+        followUpContext: contract.followUpContext || request.followUpContext,
+        scenarioConstraints: contract.scenarioConstraints || request.semanticEvidence?.scenarioConstraints,
+        candidateProfile: request.profile,
+        retrievedChunks: retrieved.chunks
+      });
+    const contextBuildElapsedMs = Math.max(0, Date.now() - contextBuildStart);
 
     if (typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
       console.log(

@@ -18,3 +18,4 @@ google-credentials*.json
 *.p12
 *.pem
 live_session_telemetry*.json
+phase64_live_session_telemetry*.json

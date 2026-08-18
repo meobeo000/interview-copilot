@@ -524,7 +524,7 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
 
   // Inherit numeric facts from previous context if resolved
   if (isContextResolved && followUpContext) {
-    for (const f of followUpContext.inheritedNumericFacts) {
+    for (const f of followUpContext.inheritedNumericFacts || []) {
       if (!requiredFacts.includes(f)) {
         requiredFacts.push(f);
       }
@@ -572,7 +572,7 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
 
   // Inherit entities from previous context if resolved
   if (isContextResolved && followUpContext) {
-    for (const e of followUpContext.inheritedEntities) {
+    for (const e of followUpContext.inheritedEntities || []) {
       if (!requiredEntities.includes(e)) {
         requiredEntities.push(e);
       }

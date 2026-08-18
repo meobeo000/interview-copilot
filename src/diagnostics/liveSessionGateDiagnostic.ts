@@ -944,7 +944,7 @@ export async function runLiveSessionGate(): Promise<{
   const turnContextManager = new InterviewTurnContextManager();
   const retriever = new KnowledgeRetriever();
 
-  const prematureCommits = 0;
+  let prematureCommits = 0;
   const duplicateCommits = 0;
   const staleSpeculativeReuses = 0;
   let candidateSafetyViolations = 0;
