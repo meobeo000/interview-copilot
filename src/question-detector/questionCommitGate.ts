@@ -1,6 +1,7 @@
 import { normalizeSemanticText, hasUnicodePhrase } from "../shared/semanticTextMatcher";
 import type { QuestionIntent } from "./intentClassifier";
 import type { SemanticEvidenceState } from "./semanticEvidence";
+import { detectFollowUp } from "./followUpDetector";
 
 export type CommitDecision = "COMMIT" | "HOLD_FRAGMENT" | "DROP";
 
@@ -35,7 +36,17 @@ export class QuestionCommitGate {
       };
     }
 
-    // 1. Valid short questions (e.g. "Tại sao?", "Vì sao?", "Sao?", "Thế nào?")
+    // 1. Valid short questions & recognized follow-up shapes (e.g. "Tại sao?", "Vì sao?", "Còn PBN?", "Tín hiệu nào?")
+    const followUpCheck = detectFollowUp(text);
+    if (followUpCheck.detected) {
+      return {
+        decision: "COMMIT",
+        isCompleteQuestion: true,
+        reason: `Valid concise follow-up question shape (${followUpCheck.type}).`,
+        confidence: 0.98
+      };
+    }
+
     const validShortQuestions = [
       "tại sao",
       "tại sao?",

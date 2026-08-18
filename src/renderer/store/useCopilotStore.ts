@@ -24,6 +24,14 @@ import type { TranscriptionService } from "../../transcription/types";
 import { parseStreamingAnswer } from "../../llm/parseAnswerJson";
 import { type CandidateProfile, loadCandidateProfile, saveCandidateProfile } from "../../shared/candidateProfile";
 import { buildAnswerContract, isContractCompatible, type AnswerContract } from "../../llm/answerContract";
+import {
+  InterviewTurnContextManager,
+  type InterviewTurnContext
+} from "../../question-detector/interviewTurnContext";
+import {
+  resolveFollowUpContext,
+  extractDecisionFromCompletedTurn
+} from "../../question-detector/followUpDetector";
 
 const historyKey = "interview-copilot.history.v1";
 
@@ -205,6 +213,7 @@ const audioCapture = createAudioCapture();
 const smartDetector = new SmartQuestionDetector();
 const corrector = new ContextAwareTranscriptCorrector();
 const prewarmPolicy = new SpeculativePrewarmPolicy();
+export const turnContextManager = new InterviewTurnContextManager();
 
 let activeTranscriptService:
   | (TranscriptionService & { sendAudio?: (frame: AudioFrame) => void; resetTurn?: () => void })
@@ -301,6 +310,7 @@ function logFinalSemanticEvidence(state: SemanticEvidenceState, intent: Question
 }
 
 function abortActiveSpeculative() {
+  turnContextManager.abortCurrentTurn();
   if (activeSpeculative) {
     activeSpeculative.abortController.abort();
     activeSpeculative.status = "aborted";
@@ -467,11 +477,19 @@ function startSpeculativePrewarmStream(
     timestamps
   };
 
+  const previousContext = turnContextManager.getPreviousCompletedContext();
+  const followUpContext = resolveFollowUpContext(
+    evidenceState.latestTranscript,
+    previousContext,
+    evidenceState.turnId
+  );
+
   const provisionalContract = buildAnswerContract({
     question: session.normalizedQuestion,
     intent: eligibility.intent,
     semanticEvidence: evidenceState,
-    candidateProfile: get().candidateProfile
+    candidateProfile: get().candidateProfile,
+    followUpContext
   });
   session.contract = provisionalContract;
 
@@ -515,6 +533,7 @@ function startSpeculativePrewarmStream(
         },
         contract: provisionalContract,
         semanticEvidence: evidenceState,
+        followUpContext,
         signal: abortController.signal
       });
 
@@ -616,11 +635,19 @@ function commitQuestion(
   const latestIntent = latestIntentCandidate;
   logFinalSemanticEvidence(evidenceSnapshot, finalIntent);
 
+  const previousContext = turnContextManager.getPreviousCompletedContext();
+  const followUpContext = resolveFollowUpContext(
+    correctedText,
+    previousContext,
+    finalTurnId
+  );
+
   const finalContract = buildAnswerContract({
     question: correctedText,
     intent: finalIntent,
     semanticEvidence: evidenceSnapshot,
-    candidateProfile: get().candidateProfile
+    candidateProfile: get().candidateProfile,
+    followUpContext
   });
 
   // Check if we can REUSE the active speculative request
@@ -694,7 +721,12 @@ function commitQuestion(
       rawTranscript: rawText,
       correctedTranscript: correctedText,
       cleanedQuestion: correctedText,
-      detectedTopic: spec.intentCategory !== "UNKNOWN" ? spec.intentCategory : "Vietnamese SEO Question",
+      detectedTopic:
+        followUpContext.contextResolved && followUpContext.inheritedIntent
+          ? followUpContext.inheritedIntent
+          : spec.intentCategory !== "UNKNOWN"
+          ? spec.intentCategory
+          : "Vietnamese SEO Question",
       intent:
         finalIntent.category !== "UNKNOWN"
           ? finalIntent
@@ -704,6 +736,8 @@ function commitQuestion(
               normalizedQuestion: correctedText,
               evidence: []
             }),
+      contract: finalContract,
+      followUpContext,
       answerProvider: answerService.providerName,
       answerModel: answerService.modelName,
       answer: spec.answer,
@@ -763,8 +797,15 @@ function commitQuestion(
     rawTranscript: rawText,
     correctedTranscript: correctedText,
     cleanedQuestion: correctedText,
-    detectedTopic: finalIntent.category !== "UNKNOWN" ? finalIntent.category : "Vietnamese SEO Question",
+    detectedTopic:
+      followUpContext.contextResolved && followUpContext.inheritedIntent
+        ? followUpContext.inheritedIntent
+        : finalIntent.category !== "UNKNOWN"
+        ? finalIntent.category
+        : "Vietnamese SEO Question",
     intent: finalIntent,
+    contract: finalContract,
+    followUpContext,
     answerProvider: answerService.providerName,
     answerModel: answerService.modelName,
     timestamps
@@ -801,6 +842,32 @@ function finalizeCommittedItem(
       console.log(formatPipelineMetricsLog(metrics));
     }
   }
+
+  const contract = item.contract;
+  const intentCat = (item.intent && typeof item.intent !== "string" ? item.intent.category : item.intent || contract?.intent || "UNKNOWN") as QuestionIntentCategory;
+  const decision = extractDecisionFromCompletedTurn(
+    item.cleanedQuestion ?? item.rawTranscript,
+    intentCat,
+    finalAnswer,
+    contract
+  );
+
+  const completedTurnContext: InterviewTurnContext = {
+    turnId: item.id,
+    question: item.cleanedQuestion ?? item.rawTranscript,
+    intent: intentCat,
+    answerType: contract?.answerType,
+    entities: contract?.requiredEntities && contract.requiredEntities.length > 0
+      ? [...contract.requiredEntities]
+      : (item.intent && typeof item.intent !== "string" ? item.intent.evidence || [] : []),
+    numericFacts: contract?.requiredFacts ? [...contract.requiredFacts] : [],
+    scenarioConstraints: contract?.scenarioConstraints,
+    decision,
+    answerSummary: finalAnswer.openingLine || (finalAnswer.bullets.slice(0, 2).join("; ")),
+    committedAt: completedAt
+  };
+
+  turnContextManager.recordCompletedTurn(completedTurnContext);
 
   const finishedItem: ConversationItem = {
     ...item,
@@ -855,11 +922,14 @@ async function streamAnswerForItem(
 
   let hasError = false;
   try {
-    const contract = buildAnswerContract({
-      question: item.cleanedQuestion ?? item.rawTranscript,
-      intent: item.intent,
-      candidateProfile: get().candidateProfile
-    });
+    const contract =
+      item.contract ||
+      buildAnswerContract({
+        question: item.cleanedQuestion ?? item.rawTranscript,
+        intent: item.intent,
+        candidateProfile: get().candidateProfile,
+        followUpContext: item.followUpContext
+      });
 
     const generator = answerService.streamAnswer({
       questionId: item.id,
@@ -872,7 +942,8 @@ async function streamAnswerForItem(
       recentHistory: get().history.slice(0, 5),
       profile: get().candidateProfile,
       intent: item.intent,
-      contract
+      contract,
+      followUpContext: item.followUpContext
     });
 
     for await (const delta of generator) {
@@ -938,6 +1009,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     transcriptController?.stop();
     clearGraceWindow();
     abortActiveSpeculative();
+    turnContextManager.reset();
     smartDetector.reset();
     resetTurnTelemetry();
 
@@ -1033,6 +1105,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
   pause: () => {
     clearGraceWindow();
     abortActiveSpeculative();
+    turnContextManager.reset();
     smartDetector.reset();
     resetTurnTelemetry();
     transcriptController?.stop();
@@ -1086,14 +1159,33 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     const finalIntent = smartDetector.detectIntent(correctedText, rawText);
     const commitTime = Date.now();
 
+    const previousContext = turnContextManager.getPreviousCompletedContext();
+    const followUpContext = resolveFollowUpContext(
+      correctedText,
+      previousContext
+    );
+    const contract = buildAnswerContract({
+      question: correctedText,
+      intent: finalIntent,
+      candidateProfile: get().candidateProfile,
+      followUpContext
+    });
+
     const newItem: ConversationItem = {
       id: crypto.randomUUID(),
       startedAt: commitTime,
       rawTranscript: rawText,
       correctedTranscript: correctedText,
       cleanedQuestion: correctedText,
-      detectedTopic: finalIntent.category !== "UNKNOWN" ? finalIntent.category : "Vietnamese SEO Question",
+      detectedTopic:
+        followUpContext.contextResolved && followUpContext.inheritedIntent
+          ? followUpContext.inheritedIntent
+          : finalIntent.category !== "UNKNOWN"
+          ? finalIntent.category
+          : "Vietnamese SEO Question",
       intent: finalIntent,
+      contract,
+      followUpContext,
       answerProvider: answerService.providerName,
       answerModel: answerService.modelName,
       timestamps: {
@@ -1119,14 +1211,33 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     const finalIntent = smartDetector.detectIntent(correctedText, rawText);
     const commitTime = Date.now();
 
+    const previousContext = turnContextManager.getPreviousCompletedContext();
+    const followUpContext = resolveFollowUpContext(
+      correctedText,
+      previousContext
+    );
+    const contract = buildAnswerContract({
+      question: correctedText,
+      intent: finalIntent,
+      candidateProfile: get().candidateProfile,
+      followUpContext
+    });
+
     const newItem: ConversationItem = {
       id: crypto.randomUUID(),
       startedAt: commitTime,
       rawTranscript: rawText,
       correctedTranscript: correctedText,
       cleanedQuestion: correctedText,
-      detectedTopic: finalIntent.category !== "UNKNOWN" ? finalIntent.category : "Vietnamese SEO Question",
+      detectedTopic:
+        followUpContext.contextResolved && followUpContext.inheritedIntent
+          ? followUpContext.inheritedIntent
+          : finalIntent.category !== "UNKNOWN"
+          ? finalIntent.category
+          : "Vietnamese SEO Question",
       intent: finalIntent,
+      contract,
+      followUpContext,
       answerProvider: answerService.providerName,
       answerModel: answerService.modelName,
       timestamps: {

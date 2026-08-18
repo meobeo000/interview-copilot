@@ -76,7 +76,8 @@ export class GeminiAnswerService implements AnswerService {
         intent: request.intent,
         semanticEvidence: request.semanticEvidence,
         retrievedChunks: retrieved.chunks,
-        candidateProfile: request.profile
+        candidateProfile: request.profile,
+        followUpContext: request.followUpContext
       });
 
     if (typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
@@ -88,7 +89,9 @@ export class GeminiAnswerService implements AnswerService {
     // Fast streaming prompt removes JSON syntax overhead so token 1 is readable Vietnamese text
     const promptText = buildFastSeoInterviewPrompt(request.profile, knowledgeContext, contract);
     const userContentText =
-      contract.requiredFacts.length > 0 || contract.requiredEntities.length > 0
+      contract.followUpContext && contract.followUpContext.contextResolved
+        ? `[INTERVIEW FOLLOW-UP CONTEXT]:\nFollow-up Type: ${contract.followUpContext.followUpType}\nCurrent Spoken Question: "${request.question}"\nPrevious Question: "${contract.followUpContext.previousQuestion || "N/A"}"\nInherited Intent: ${contract.intent}\nResolved Directive: ${contract.followUpContext.resolvedMeaning || "Answer in context."}`
+        : contract.requiredFacts.length > 0 || contract.requiredEntities.length > 0
         ? `[INTERVIEW QUESTION & STRUCTURED FACTS]:\nIntent: ${contract.intent}\nFacts: ${contract.requiredFacts.join("; ") || "Standard"}\nEntities: ${contract.requiredEntities.join(", ") || "Standard"}\nSpoken Transcript: "${request.question}"`
         : `Interviewer Question:\n"${request.question}"`;
 

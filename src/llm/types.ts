@@ -26,6 +26,7 @@ export interface AnswerRequest {
   knowledgeContext?: string;
   contract?: import("./answerContract").AnswerContract;
   semanticEvidence?: import("../question-detector/semanticEvidence").SemanticEvidenceState;
+  followUpContext?: import("../question-detector/interviewTurnContext").ResolvedFollowUpContext;
   signal?: AbortSignal;
 }
 

@@ -24,6 +24,8 @@ export interface ConversationItem {
   answerProvider?: string;
   answerModel?: string;
   intent?: QuestionIntent;
+  contract?: import("../llm/answerContract").AnswerContract;
+  followUpContext?: import("../question-detector/interviewTurnContext").ResolvedFollowUpContext;
   timestamps?: PipelineTimestamps;
 }
 

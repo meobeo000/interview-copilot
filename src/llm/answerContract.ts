@@ -32,6 +32,8 @@ export interface GroundedContractFact {
 }
 
 import type { ScenarioConstraints } from "../question-detector/scenarioConstraints";
+import type { ResolvedFollowUpContext } from "../question-detector/interviewTurnContext";
+import { formatFollowUpContextForPrompt } from "../question-detector/followUpDetector";
 
 export interface AnswerContract {
   intent: QuestionIntentCategory;
@@ -47,6 +49,7 @@ export interface AnswerContract {
   groundedFacts: GroundedContractFact[];
   allocationGrounding?: AllocationGrounding;
   scenarioConstraints?: ScenarioConstraints;
+  followUpContext?: ResolvedFollowUpContext;
   contractBuildMs: number;
 }
 
@@ -56,6 +59,7 @@ export interface BuildAnswerContractOptions {
   semanticEvidence?: SemanticEvidenceState;
   retrievedChunks?: KnowledgeChunk[];
   candidateProfile?: CandidateProfile;
+  followUpContext?: ResolvedFollowUpContext;
 }
 
 const FORBIDDEN_AI_PHRASES = [
@@ -480,11 +484,17 @@ export function extractGroundedContractFacts(
  */
 export function buildAnswerContract(options: BuildAnswerContractOptions): AnswerContract {
   const start = performance.now();
-  const { question, intent, semanticEvidence, retrievedChunks = [], candidateProfile } = options;
+  const { question, intent, semanticEvidence, retrievedChunks = [], candidateProfile, followUpContext } = options;
 
-  const intentCategory: QuestionIntentCategory = (
+  const isContextResolved = Boolean(followUpContext && followUpContext.contextResolved);
+
+  let intentCategory: QuestionIntentCategory = (
     typeof intent === "string" ? intent : intent?.category || semanticEvidence?.bestIntent || "UNKNOWN"
   ) as QuestionIntentCategory;
+
+  if (isContextResolved && followUpContext?.inheritedIntent && (intentCategory === "UNKNOWN" || intentCategory === "STRATEGY_PLAN")) {
+    intentCategory = followUpContext.inheritedIntent;
+  }
 
   // 1. Extract Required Facts
   const requiredFacts: string[] = [];
@@ -512,6 +522,15 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
 
   if (semanticEvidence?.percentages && semanticEvidence.percentages.length > 0) {
     requiredFacts.push(`metrics: ${semanticEvidence.percentages.map((p) => `${p}%`).join(", ")}`);
+  }
+
+  // Inherit numeric facts from previous context if resolved
+  if (isContextResolved && followUpContext) {
+    for (const f of followUpContext.inheritedNumericFacts) {
+      if (!requiredFacts.includes(f)) {
+        requiredFacts.push(f);
+      }
+    }
   }
 
   // 2. Extract Required Entities
@@ -543,6 +562,18 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
   for (const item of lexiconCheck) {
     if (!requiredEntities.includes(item.name) && item.matches.some((m) => qLower.includes(m))) {
       requiredEntities.push(item.name);
+    }
+  }
+
+  // Inherit entities from previous context if resolved
+  if (isContextResolved && followUpContext) {
+    for (const e of followUpContext.inheritedEntities) {
+      if (!requiredEntities.includes(e)) {
+        requiredEntities.push(e);
+      }
+    }
+    if (followUpContext.targetEntity && !requiredEntities.includes(followUpContext.targetEntity)) {
+      requiredEntities.push(followUpContext.targetEntity);
     }
   }
 
@@ -638,6 +669,70 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
       break;
   }
 
+  // Tailor directives if context is resolved for a short follow-up
+  if (isContextResolved && followUpContext) {
+    switch (followUpContext.followUpType) {
+      case "WHY":
+      case "DECISION_REASON":
+        if (intentCategory === "DOMAIN_SELECTION") {
+          answerType = "DIRECT_DECISION";
+          const chosenDomain = followUpContext.targetEntity || followUpContext.previousDecision?.choice || "domain B";
+          firstSentenceDirective = `Sentence 1 MUST immediately explain WHY ${chosenDomain} was selected over other options (e.g. clean history and real organic traffic > 0-traffic vanity DR).`;
+          preferredStructure = "Sentence 1: Direct explanation for why the chosen domain was preferred. Sentence 2-3: Core differences (organic traffic signal vs vanity DR risk). Sentence 4: Verification required before purchase.";
+          maxWords = 100;
+        } else if (intentCategory === "NEGATIVE_SEO") {
+          answerType = "DIRECT_DECISION";
+          firstSentenceDirective = `Sentence 1 MUST state why immediate disavow is avoided (e.g. "Vì ranking chỉ dao động nhẹ và chưa rõ link spam đã index hay ảnh hưởng thực tế chưa, nên em cần theo dõi và đánh giá trước.").`;
+          preferredStructure = "Sentence 1: Direct reason for delaying disavow (monitor first). Sentence 2-3: How to inspect indexation and ranking correlation. Sentence 4: Disavow trigger condition.";
+          maxWords = 100;
+        } else {
+          answerType = "DIRECT_DECISION";
+          firstSentenceDirective = `Sentence 1 MUST directly explain the technical reasoning for the previous decision without generic fluff.`;
+          preferredStructure = "Sentence 1: Explicit technical rationale. Sentence 2-3: Practical reasoning with SEO terms. Sentence 4: Signal-based condition.";
+          maxWords = 100;
+        }
+        break;
+
+      case "SIGNAL":
+        answerType = "DIRECT_TIMING_EXPLANATION";
+        firstSentenceDirective = `Sentence 1 MUST name the concrete, verifiable signals (GSC URL inspection status, keyword impression emergence, ranking trend) that trigger the next action.`;
+        preferredStructure = "Sentence 1: Concrete signals required. Sentence 2-3: Diagnostic checkpoints in GSC/Ahrefs. Sentence 4: Action taken once signals appear.";
+        maxWords = 100;
+        break;
+
+      case "WHEN":
+        answerType = "DIRECT_TIMING_EXPLANATION";
+        firstSentenceDirective = `Sentence 1 MUST state the exact timing milestone or signal condition for when to proceed or stop.`;
+        preferredStructure = "Sentence 1: Specific timing/signal milestone. Sentence 2-3: Diagnostic checkpoints. Sentence 4: Stop/proceed criteria.";
+        maxWords = 100;
+        break;
+
+      case "FAILURE_NEXT_STEP":
+        answerType = "DIRECT_ACTION_DIAGNOSIS";
+        firstSentenceDirective = `Sentence 1 MUST advance to the next level of diagnostic action (e.g. deeper technical audit, search intent mismatch, competitor movement), assuming initial checks ("${followUpContext.previousDecision?.action || followUpContext.previousAnswerSummary || "initial on-page & internal link checklist"}") showed no improvement.`;
+        preferredStructure = "Sentence 1: Next-level action (do NOT repeat already attempted steps). Sentence 2-3: Deeper technical checkpoints. Sentence 4: Remediation timeframe.";
+        maxWords = 110;
+        break;
+
+      case "ENTITY_CONTINUATION":
+        if (intentCategory === "BUDGET_ALLOCATION") {
+          answerType = "DIRECT_ALLOCATION";
+          firstSentenceDirective = `Sentence 1 MUST focus specifically on ${followUpContext.targetEntity || "the requested entity"} within the same total budget (${requiredFacts.find((f) => f.startsWith("budget")) || "total budget"}) scenario.`;
+          preferredStructure = `Sentence 1: Concrete role and portion of ${followUpContext.targetEntity || "this entity"}. Sentence 2-3: Implementation strategy and timing. Sentence 4: Quality/verification criteria.`;
+          maxWords = 110;
+        } else {
+          firstSentenceDirective = `Sentence 1 MUST directly address ${followUpContext.targetEntity || "the requested entity"} within the ongoing scenario without repeating generic definitions.`;
+          maxWords = 100;
+        }
+        break;
+
+      case "GENERAL_CONTINUATION":
+        firstSentenceDirective = `Sentence 1 MUST state the immediate next operational step following the previous action.`;
+        maxWords = 100;
+        break;
+    }
+  }
+
   const forbiddenBehaviors = [
     `Do NOT use generic filler phrases: ${FORBIDDEN_AI_PHRASES.map((p) => `"${p}"`).join(", ")}`,
     "Do NOT write an article, essay, or academic definition. Generate natural spoken Vietnamese for an interview.",
@@ -653,7 +748,17 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
     forbiddenBehaviors.push("In PROPOSED mode, do NOT present proposed numbers as known historical facts or candidate personal history. Sentence 1 MUST use proposal/approximation wording.");
   }
 
-  const scenarioConstraints = options.semanticEvidence?.scenarioConstraints;
+  let scenarioConstraints = options.semanticEvidence?.scenarioConstraints;
+  if (isContextResolved && followUpContext?.inheritedConstraints) {
+    scenarioConstraints = {
+      ...followUpContext.inheritedConstraints,
+      ...(scenarioConstraints || {}),
+      provenance: [
+        ...(followUpContext.inheritedConstraints.provenance || []),
+        ...(scenarioConstraints?.provenance || [])
+      ]
+    };
+  }
 
   const contractBuildMs = Math.round((performance.now() - start) * 100) / 100;
 
@@ -671,6 +776,7 @@ export function buildAnswerContract(options: BuildAnswerContractOptions): Answer
     groundedFacts,
     allocationGrounding,
     scenarioConstraints,
+    followUpContext,
     contractBuildMs
   };
 }
@@ -796,6 +902,11 @@ export function formatContractForPrompt(contract: AnswerContract): string {
   lines.push("- Forbidden Behaviors:");
   for (const fb of contract.forbiddenBehaviors) {
     lines.push(`  * ${fb}`);
+  }
+
+  if (contract.followUpContext && contract.followUpContext.contextResolved) {
+    lines.push("");
+    lines.push(formatFollowUpContextForPrompt(contract.followUpContext));
   }
 
   return lines.join("\n");
