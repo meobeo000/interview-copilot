@@ -22,6 +22,7 @@
     "diagnostic:phase64-live-gate": "npx tsx src/diagnostics/phase64LiveGateDiagnostic.ts",
     "diagnostic:fallback-safety": "npx tsx src/diagnostics/fallbackSafetyDiagnostic.ts",
     "diagnostic:practitioner-grounding": "npx tsx src/diagnostics/practitionerGroundingDiagnostic.ts",
+    "diagnostic:practitioner-playbook": "npx tsx src/diagnostics/practitionerPlaybookDiagnostic.ts",
     "test": "vitest run",
     "build": "tsc -p tsconfig.node.json && vite build"
   },

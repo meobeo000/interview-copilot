@@ -5,6 +5,7 @@ import type { QuestionShape, QuestionShapeResult } from "../question-detector/qu
 import type { ResolvedFollowUpContext } from "../question-detector/interviewTurnContext";
 import type { ScenarioConstraints } from "../question-detector/scenarioConstraints";
 import {
+  type PractitionerPlaybookEntry,
   type PractitionerInterviewReference
 } from "./practitionerInterviewReference";
 import { getPractitionerReferenceRetriever } from "./practitionerReferenceRetriever";
@@ -73,7 +74,7 @@ export function buildAnswerKnowledgeContext(options: ContextBuilderOptions): str
   }
 
   // 3. Practitioner references (retrieved deterministically if not explicitly passed)
-  let practitionerRefs = options.practitionerReferences;
+  let practitionerRefs: PractitionerPlaybookEntry[] | undefined = options.practitionerReferences;
   if (!practitionerRefs && legacyPractitionerChunks.length === 0) {
     const retrieval = getPractitionerReferenceRetriever().retrieve({
       question: options.question,
@@ -91,7 +92,7 @@ export function buildAnswerKnowledgeContext(options: ContextBuilderOptions): str
   // Build Practitioner Section
   practitionerLines.push("PRACTITIONER PLAYBOOK (Reference Strategy Inspiration - NOT Personal History):");
   practitionerLines.push("- [PRACTITIONER INTERVIEW REFERENCE - GROUNDING INSTRUCTIONS]:");
-  practitionerLines.push("  * Guidance is reference pattern only; do NOT copy mechanically or convert examples to universal rules.");
+  practitionerLines.push("  * Guidance is reference pattern/heuristic/example only; do NOT copy mechanically or convert examples to universal rules.");
   practitionerLines.push("  * NEVER claim 'Ở dự án UU88 em đã...' unless verified in candidate facts.");
 
   if (legacyPractitionerChunks.length > 0) {
@@ -102,10 +103,12 @@ export function buildAnswerKnowledgeContext(options: ContextBuilderOptions): str
 
   if (practitionerRefs && practitionerRefs.length > 0) {
     for (const ref of practitionerRefs) {
-      const gSummary = ref.guidance.slice(0, 2).join("; ");
+      const confidenceTag = ref.sourceConfidence ? ` [${ref.sourceConfidence}]` : "";
+      const gSummary = ref.guidance ? ref.guidance.slice(0, 2).join("; ") : "";
+      const sigSummary = ref.decisionSignals?.[0] ? ` [Tín hiệu: ${ref.decisionSignals.slice(0, 2).join(", ")}]` : "";
       const exSummary = ref.practitionerExamples?.[0] ? ` [Ví dụ: ${ref.practitionerExamples[0]}]` : "";
       const cautionSummary = ref.cautions?.[0] ? ` [Lưu ý: ${ref.cautions[0]}]` : "";
-      practitionerLines.push(`- [Practitioner Reference: ${ref.id}]: ${gSummary}${exSummary}${cautionSummary}`);
+      practitionerLines.push(`- [Practitioner Reference: ${ref.id}${confidenceTag}]: ${gSummary}${sigSummary}${exSummary}${cautionSummary}`);
     }
   }
 

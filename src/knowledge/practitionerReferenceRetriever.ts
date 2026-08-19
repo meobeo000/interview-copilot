@@ -4,6 +4,7 @@ import type { ResolvedFollowUpContext } from "../question-detector/interviewTurn
 import type { ScenarioConstraints } from "../question-detector/scenarioConstraints";
 import { hasUnicodePhrase } from "../shared/semanticTextMatcher";
 import {
+  type PractitionerPlaybookEntry,
   type PractitionerInterviewReference,
   SEEDED_PRACTITIONER_REFERENCES
 } from "./practitionerInterviewReference";
@@ -20,7 +21,7 @@ export interface PractitionerReferenceRetrievalOptions {
 }
 
 export interface PractitionerReferenceRetrievalResult {
-  references: PractitionerInterviewReference[];
+  references: PractitionerPlaybookEntry[];
   selectedCount: number;
   totalEvaluated: number;
   retrievalElapsedMs: number;
@@ -34,7 +35,7 @@ export interface PractitionerReferenceRetrievalResult {
 const MIN_RELEVANCE_THRESHOLD = 8;
 
 export class PractitionerReferenceRetriever {
-  private references: PractitionerInterviewReference[];
+  private references: PractitionerPlaybookEntry[];
 
   constructor(references: PractitionerInterviewReference[] = SEEDED_PRACTITIONER_REFERENCES) {
     this.references = [...references];
@@ -81,7 +82,7 @@ export class PractitionerReferenceRetriever {
       ...(options.numericFacts || []).map((f) => f.toLowerCase())
     ].join(" ");
 
-    const scored: Array<{ ref: PractitionerInterviewReference; score: number; priorityTier: number }> = [];
+    const scored: Array<{ ref: PractitionerPlaybookEntry; score: number; priorityTier: number }> = [];
 
     // Semantic cue check functions using Unicode-safe boundary matching
     const isDomainHuntingInquiry = (): boolean => {
@@ -141,6 +142,23 @@ export class PractitionerReferenceRetriever {
         "domain 301"
       ];
       return domainCues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
+    };
+
+    const isTldTestingInquiry = (): boolean => {
+      const tldCues = [
+        "tld testing",
+        "thử nghiệm tld",
+        "test .in",
+        "test .me",
+        "đuôi tên miền",
+        "đuôi domain",
+        ".in",
+        ".me",
+        ".my",
+        ".nl",
+        ".co.in"
+      ];
+      return tldCues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
     };
 
     const isPbnTimingInquiry = (): boolean => {
@@ -205,7 +223,9 @@ export class PractitionerReferenceRetriever {
         "chuẩn bị domain 301",
         "backup domain cho 301",
         "chuyển hướng 301",
-        "domain để 301"
+        "domain để 301",
+        "map url",
+        "sau khi 301"
       ];
       return r301Cues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
     };
@@ -215,6 +235,8 @@ export class PractitionerReferenceRetriever {
         return (
           hasUnicodePhrase(fullSearchText, "20 triệu") ||
           hasUnicodePhrase(fullSearchText, "20m") ||
+          hasUnicodePhrase(fullSearchText, "25 triệu") ||
+          hasUnicodePhrase(fullSearchText, "25m") ||
           hasUnicodePhrase(fullSearchText, "50 triệu") ||
           hasUnicodePhrase(fullSearchText, "ngân sách") ||
           hasUnicodePhrase(fullSearchText, "budget") ||
@@ -233,6 +255,18 @@ export class PractitionerReferenceRetriever {
         "site betting mới hoàn toàn"
       ];
       return initialCues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
+    };
+
+    const isPbnInfrastructureInquiry = (): boolean => {
+      const pbnInfraCues = [
+        "footprint",
+        "hệ thống pbn",
+        "dựng pbn",
+        "tách footprint",
+        "ip class c",
+        "dải ip"
+      ];
+      return pbnInfraCues.some((cue) => hasUnicodePhrase(fullSearchText, cue));
     };
 
     const isNegativeSeoInquiry = (): boolean => {
@@ -265,6 +299,14 @@ export class PractitionerReferenceRetriever {
           }
           break;
 
+        case "ref:tld-testing-experimentation":
+          if (isTldTestingInquiry()) {
+            score = 15;
+            if (intentCategory === "DOMAIN_SELECTION") score += 5;
+            priorityTier = 1;
+          }
+          break;
+
         case "ref:no-keyword-signal-troubleshooting":
           if (isNoKeywordInquiry()) {
             score = 15;
@@ -289,10 +331,32 @@ export class PractitionerReferenceRetriever {
           }
           break;
 
+        case "ref:301-redirect-contingency":
+          if (isRedirect301Inquiry()) {
+            score = 15;
+            if (intentCategory === "REDIRECT_301") score += 5;
+            priorityTier = 1;
+          }
+          break;
+
         case "ref:project-initial-execution":
           if (isProjectInitialExecutionInquiry()) {
             score = 15;
             if (intentCategory === "BUDGET_ALLOCATION") score += 5;
+            priorityTier = 2;
+          }
+          break;
+
+        case "ref:initial-budget-allocation":
+          if (intentCategory === "BUDGET_ALLOCATION" && isProjectInitialExecutionInquiry()) {
+            score = 15;
+            priorityTier = 2;
+          }
+          break;
+
+        case "ref:pbn-infrastructure-footprint":
+          if (isPbnInfrastructureInquiry()) {
+            score = 15;
             priorityTier = 2;
           }
           break;
@@ -304,6 +368,16 @@ export class PractitionerReferenceRetriever {
             priorityTier = 1;
           }
           break;
+      }
+
+      // Interviewer pattern alignment boost (+3)
+      if (score > 0 && ref.interviewerPatterns) {
+        for (const pattern of ref.interviewerPatterns) {
+          if (hasUnicodePhrase(fullSearchText, pattern.toLowerCase())) {
+            score += 3;
+            break;
+          }
+        }
       }
 
       // Applicable entity matches if score already started
