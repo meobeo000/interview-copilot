@@ -262,14 +262,20 @@ export class SmartQuestionDetector implements QuestionDetector {
     const gateEval = QuestionCommitGate.evaluate(trimmed, this.accumulator.getState(), intent);
 
     if (gateEval.decision === "COMMIT") {
+      if (typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
+        console.log(`[COMMIT_FINAL] timestamp=${new Date().toISOString()} text="${trimmed}" intent="${intent.category}" reason="${gateEval.reason}"`);
+      }
       onFinalizeCandidate({
         text: trimmed,
         isComplete: true,
         reason: `QuestionCommitGate: ${gateEval.reason}`,
         intent
       });
-    } else if (typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
-      console.log(`[QUESTION COMMIT GATE] decision: ${gateEval.decision} | reason: ${gateEval.reason} | text: "${trimmed}"`);
+    } else {
+      if (typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
+        console.log(`[HOLD_FRAGMENT] timestamp=${new Date().toISOString()} text="${trimmed}" reason="${gateEval.reason}"`);
+        console.log(`[QUESTION COMMIT GATE] decision: ${gateEval.decision} | reason: ${gateEval.reason} | text: "${trimmed}"`);
+      }
     }
   }
 

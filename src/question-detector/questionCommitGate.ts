@@ -65,7 +65,23 @@ export class QuestionCommitGate {
       "chọn con nào",
       "chọn con nào?",
       "em chọn con nào",
-      "em chọn con nào?"
+      "em chọn con nào?",
+      "em check gì",
+      "em check gì?",
+      "check gì",
+      "check gì?",
+      "còn pbn",
+      "còn pbn?",
+      "khi nào đổi",
+      "khi nào đổi?",
+      "rủi ro là gì",
+      "rủi ro là gì?",
+      "tín hiệu nào",
+      "tín hiệu nào?",
+      "bước tiếp theo",
+      "bước tiếp theo?",
+      "bước tiếp theo là gì",
+      "bước tiếp theo là gì?"
     ];
 
     if (validShortQuestions.includes(lower)) {
@@ -77,7 +93,87 @@ export class QuestionCommitGate {
       };
     }
 
-    // 2. Fragment Dangling Endings / Prefixes Check
+    // 2. Trailing Continuation Connectors & Incomplete Clause Endings Check
+    // If text ends with an open connector or dangling transition, it MUST be held
+    const trailingIncompleteConnectors = [
+      "để",
+      "nhằm",
+      "rồi",
+      "sau đó",
+      "còn",
+      "nếu",
+      "thì",
+      "và",
+      "hoặc",
+      "nhưng",
+      "trước khi",
+      "sau khi",
+      "trong trường hợp",
+      "ví dụ",
+      "theo thứ tự",
+      "để lọc",
+      "để chọn",
+      "để đánh giá",
+      "để quyết định"
+    ];
+
+    const cleanEnd = lower.replace(/[.,?!:;]+$/g, "").trim();
+
+    for (const connector of trailingIncompleteConnectors) {
+      if (cleanEnd.endsWith(connector) || cleanEnd === connector) {
+        return {
+          decision: "HOLD_FRAGMENT",
+          isCompleteQuestion: false,
+          reason: `Trailing continuation connector detected: "${connector}" at end of "${text}"`,
+          confidence: 0.96
+        };
+      }
+    }
+
+    // 3. Trailing Punctuation / Incomplete Setup Clause
+    // If text ends with a trailing comma and lacks final question closure
+    if (text.endsWith(",") || text.endsWith("...")) {
+      return {
+        decision: "HOLD_FRAGMENT",
+        isCompleteQuestion: false,
+        reason: `Dangling clause with trailing comma/ellipsis: "${text}"`,
+        confidence: 0.95
+      };
+    }
+
+    // 4. Comparative Setup Clauses (e.g. "Domain A DR 55 nhưng traffic bằng 0,")
+    // When a single option is described without a comparison question predicate
+    if (
+      (lower.includes("domain a") || lower.includes("con a")) &&
+      !lower.includes("domain b") &&
+      !lower.includes("con b") &&
+      !lower.includes("chọn")
+    ) {
+      return {
+        decision: "HOLD_FRAGMENT",
+        isCompleteQuestion: false,
+        reason: `Incomplete comparative option setup: "${text}"`,
+        confidence: 0.95
+      };
+    }
+
+    // 5. Open Workflow Clauses without trailing Question Mark or Purpose closure
+    // e.g. "Em sẽ kiểm tra những gì, theo thứ tự nào" without trailing '?'
+    const isOpenWorkflowClauseWithoutClosure =
+      (cleanEnd.endsWith("theo thứ tự nào") || cleanEnd.endsWith("thứ tự nào")) &&
+      !text.endsWith("?") &&
+      (lower.includes("kiểm tra") || lower.includes("làm gì") || lower.includes("triển khai") || lower.includes("những gì"));
+
+    if (isOpenWorkflowClauseWithoutClosure) {
+      return {
+        decision: "HOLD_FRAGMENT",
+        isCompleteQuestion: false,
+        reason: `Open workflow sequence clause pending purpose/goal closure: "${text}"`,
+        confidence: 0.94
+      };
+    }
+
+    // 6. Dangling Prefixes Check
     const danglingPrefixes = [
       "dựa trên",
       "dựa vào",
@@ -178,7 +274,7 @@ export class QuestionCommitGate {
       };
     }
 
-    // 3. Complete Question Validation
+    // 7. Complete Question Validation
     if (hasInterrogative || hasActionRequest || hasQuestionMark || isConditionalQuestion) {
       return {
         decision: "COMMIT",

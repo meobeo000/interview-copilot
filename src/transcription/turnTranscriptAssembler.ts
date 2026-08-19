@@ -135,8 +135,12 @@ export class TurnTranscriptAssembler {
    */
   applyFinal(text: string): string {
     const trimmed = text.trim();
+    const prior = this.committedSegments.join(" ");
     if (trimmed) {
       this.committedSegments = mergeSegmentWithOverlap(this.committedSegments, trimmed);
+      if (prior && prior !== this.committedSegments.join(" ") && typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
+        console.log(`[CONTINUATION_MERGED] timestamp=${new Date().toISOString()} prior="${prior}" incoming="${trimmed}" merged="${this.getDisplayTranscript()}"`);
+      }
     }
     this.currentPartial = "";
     this.updatedAt = Date.now();
