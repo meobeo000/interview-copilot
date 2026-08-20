@@ -97,6 +97,10 @@ export function App() {
     toggleClickThrough,
     navigateHistory,
     makeAnswerShorter,
+    makeAnswerMoreTechnical,
+    explainAnswerWhy,
+    giveAnswerExample,
+    defendAnswer,
     clearCurrentTurn,
     updateProfile,
     createSession,
@@ -466,7 +470,15 @@ export function App() {
             </div>
           </div>
           <div className="compact-answer-card">
-            <AnswerPanel answer={displayAnswer} isAnswering={status === "Answering"} />
+            <AnswerPanel
+              answer={displayAnswer}
+              isAnswering={status === "Answering"}
+              onShorter={() => void makeAnswerShorter()}
+              onTechnical={() => void makeAnswerMoreTechnical()}
+              onExplainWhy={() => void explainAnswerWhy()}
+              onGiveExample={() => void giveAnswerExample()}
+              onDefend={() => void defendAnswer()}
+            />
           </div>
         </div>
       ) : (
@@ -483,7 +495,15 @@ export function App() {
           </div>
 
           <div className="right-column">
-            <AnswerPanel answer={displayAnswer} isAnswering={status === "Answering"} />
+            <AnswerPanel
+              answer={displayAnswer}
+              isAnswering={status === "Answering"}
+              onShorter={() => void makeAnswerShorter()}
+              onTechnical={() => void makeAnswerMoreTechnical()}
+              onExplainWhy={() => void explainAnswerWhy()}
+              onGiveExample={() => void giveAnswerExample()}
+              onDefend={() => void defendAnswer()}
+            />
           </div>
         </div>
       )}

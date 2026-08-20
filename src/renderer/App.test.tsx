@@ -418,8 +418,8 @@ describe("Phase 2: Live Interview HUD Controls & Keyboard Shortcuts", () => {
   it("condenses answer into shorter format via Ngắn hơn button and Alt+S", () => {
     render(<App />);
 
-    const shorterBtn = screen.getByTitle(/Rút ngắn câu trả lời/i);
-    fireEvent.click(shorterBtn);
+    const shorterBtns = screen.getAllByTitle(/Rút ngắn câu trả lời/i);
+    fireEvent.click(shorterBtns[0]);
 
     const answer = useCopilotStore.getState().answer;
     expect(answer.bullets.length).toBeLessThanOrEqual(2);

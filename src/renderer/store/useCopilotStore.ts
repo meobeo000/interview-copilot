@@ -27,6 +27,7 @@ import { MockTranscriptService } from "../../transcription/mockTranscriptService
 import { RealStreamingSTTService } from "../../transcription/realStreamingSTT";
 import type { TranscriptionService } from "../../transcription/types";
 import { parseStreamingAnswer } from "../../llm/parseAnswerJson";
+import { applyAnswerAction } from "../../llm/factSafety";
 import { type CandidateProfile, loadCandidateProfile, saveCandidateProfile } from "../../shared/candidateProfile";
 import {
   type SessionConfig,
@@ -172,6 +173,10 @@ export interface CopilotState {
   toggleClickThrough: () => Promise<void>;
   navigateHistory: (direction: "prev" | "next" | "live") => void;
   makeAnswerShorter: () => Promise<void>;
+  makeAnswerMoreTechnical: () => Promise<void>;
+  explainAnswerWhy: () => Promise<void>;
+  giveAnswerExample: () => Promise<void>;
+  defendAnswer: () => Promise<void>;
   clearCurrentTurn: () => void;
   updateProfile: (profile: CandidateProfile) => void;
   createSession: (partial?: Partial<SessionConfig>) => SessionConfig;
@@ -1226,20 +1231,32 @@ export const useCopilotStore = create<CopilotState>((set, get) => {
     makeAnswerShorter: async () => {
       const currentAnswer = get().answer;
       if (!currentAnswer.bullets || currentAnswer.bullets.length === 0) return;
-      const shorterOpening = currentAnswer.openingLine
-        ? currentAnswer.openingLine.split(/(?<=[.?!])\s+/)[0]
-        : currentAnswer.openingLine;
-      const shorterBullets = currentAnswer.bullets.slice(0, 2).map((b) => {
-        const sentences = b.split(/(?<=[.?!])\s+/);
-        return sentences[0] || b;
-      });
-      set({
-        answer: {
-          ...currentAnswer,
-          openingLine: shorterOpening,
-          bullets: shorterBullets
-        }
-      });
+      const modified = applyAnswerAction(currentAnswer, "SHORTER");
+      set({ answer: modified });
+    },
+    makeAnswerMoreTechnical: async () => {
+      const currentAnswer = get().answer;
+      if (!currentAnswer.bullets || currentAnswer.bullets.length === 0) return;
+      const modified = applyAnswerAction(currentAnswer, "MORE_TECHNICAL");
+      set({ answer: modified });
+    },
+    explainAnswerWhy: async () => {
+      const currentAnswer = get().answer;
+      if (!currentAnswer.bullets || currentAnswer.bullets.length === 0) return;
+      const modified = applyAnswerAction(currentAnswer, "EXPLAIN_WHY");
+      set({ answer: modified });
+    },
+    giveAnswerExample: async () => {
+      const currentAnswer = get().answer;
+      if (!currentAnswer.bullets || currentAnswer.bullets.length === 0) return;
+      const modified = applyAnswerAction(currentAnswer, "GIVE_EXAMPLE");
+      set({ answer: modified });
+    },
+    defendAnswer: async () => {
+      const currentAnswer = get().answer;
+      if (!currentAnswer.bullets || currentAnswer.bullets.length === 0) return;
+      const modified = applyAnswerAction(currentAnswer, "DEFEND_ANSWER");
+      set({ answer: modified });
     },
     clearCurrentTurn: () => {
       clearGraceWindow();
