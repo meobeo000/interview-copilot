@@ -349,3 +349,122 @@ describe("App Phase 3B ChatGPT Voice multi-segment turn isolation tests", () => 
     expect(q2.correctedTranscript).toBe("Em nói cho anh từ lúc nhận sai đến lúc keyword lên như thế nào?");
   });
 });
+
+describe("Phase 2: Live Interview HUD Controls & Keyboard Shortcuts", () => {
+  beforeEach(() => {
+    vi.stubEnv("VITE_USE_MOCK_STT", "false");
+    window.localStorage.clear();
+    useCopilotStore.setState({
+      status: "Idle",
+      audioLevel: 0,
+      liveTranscript: "",
+      rawQuestion: "",
+      cleanedQuestion: "",
+      detectedTopic: "",
+      compactMode: false,
+      isPinned: true,
+      opacityLevel: 1.0,
+      isClickThrough: false,
+      activeHistoryIndex: null,
+      sessionStartTime: 10000,
+      answer: {
+        openingLine: "Đây là câu mở đầu chi tiết về chiến lược SEO iGaming.",
+        bullets: ["Ý 1: Xây dựng nền tảng technical và audit crawl budget.", "Ý 2: Triển khai content silo và internal link.", "Ý 3: Phân bổ ngân sách PBN an toàn."],
+        keywords: ["SEO", "PBN"]
+      },
+      history: [
+        {
+          id: "turn-1",
+          turnId: "turn-1",
+          startedAt: 1000,
+          rawTranscript: "Turn 1: PBN là gì?",
+          cleanedQuestion: "PBN là gì?",
+          answer: { openingLine: "PBN là mạng blog vệ tinh cá nhân.", bullets: ["B1"], keywords: [] }
+        },
+        {
+          id: "turn-2",
+          turnId: "turn-2",
+          startedAt: 2000,
+          rawTranscript: "Turn 2: Tiêu chí săn domain?",
+          cleanedQuestion: "Tiêu chí săn domain?",
+          answer: { openingLine: "Kiểm tra Wayback và anchor text.", bullets: ["B2"], keywords: [] }
+        }
+      ],
+      isHistoryOpen: false,
+      error: undefined
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("toggles compact mode via button and shortcut Alt+C", () => {
+    render(<App />);
+
+    expect(useCopilotStore.getState().compactMode).toBe(false);
+
+    // Click compact toggle button
+    const compactBtn = screen.getByTitle(/Thu gọn HUD/i);
+    fireEvent.click(compactBtn);
+    expect(useCopilotStore.getState().compactMode).toBe(true);
+
+    // Alt+C shortcut to toggle back
+    fireEvent.keyDown(window, { altKey: true, key: "c" });
+    expect(useCopilotStore.getState().compactMode).toBe(false);
+  });
+
+  it("condenses answer into shorter format via Ngắn hơn button and Alt+S", () => {
+    render(<App />);
+
+    const shorterBtn = screen.getByTitle(/Rút ngắn câu trả lời/i);
+    fireEvent.click(shorterBtn);
+
+    const answer = useCopilotStore.getState().answer;
+    expect(answer.bullets.length).toBeLessThanOrEqual(2);
+    expect(answer.bullets[0]).toContain("Ý 1: Xây dựng nền tảng technical");
+  });
+
+  it("clears current turn via Xóa button and Alt+X", () => {
+    useCopilotStore.setState({
+      rawQuestion: "Câu hỏi nháp",
+      cleanedQuestion: "Câu hỏi nháp",
+      liveTranscript: "Đang nghe dở dang..."
+    });
+
+    render(<App />);
+
+    const clearBtn = screen.getByTitle(/Xóa câu hỏi hiện tại/i);
+    fireEvent.click(clearBtn);
+
+    expect(useCopilotStore.getState().cleanedQuestion).toBe("");
+    expect(useCopilotStore.getState().liveTranscript).toBe("");
+  });
+
+  it("navigates previous and next turns in history directly inside HUD", () => {
+    render(<App />);
+
+    // Click prev turn
+    const prevBtn = screen.getByLabelText("Lượt trước");
+    fireEvent.click(prevBtn);
+
+    expect(useCopilotStore.getState().activeHistoryIndex).toBe(0);
+    expect(screen.getByText("Turn 2/2")).toBeInTheDocument();
+
+    // Step further back
+    fireEvent.click(prevBtn);
+    expect(useCopilotStore.getState().activeHistoryIndex).toBe(1);
+    expect(screen.getByText("Turn 1/2")).toBeInTheDocument();
+
+    // Step forward back to live
+    const nextBtn = screen.getByLabelText("Lượt sau");
+    fireEvent.click(nextBtn);
+    expect(useCopilotStore.getState().activeHistoryIndex).toBe(0);
+
+    fireEvent.click(nextBtn);
+    expect(useCopilotStore.getState().activeHistoryIndex).toBe(null);
+    expect(screen.getByText("Live")).toBeInTheDocument();
+  });
+});
+

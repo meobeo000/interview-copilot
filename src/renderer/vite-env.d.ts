@@ -3,6 +3,10 @@
 interface Window {
   copilotWindow: {
     hide: () => Promise<void>;
+    minimize?: () => Promise<void>;
+    setAlwaysOnTop?: (enabled: boolean) => Promise<boolean>;
+    setOpacity?: (opacity: number) => Promise<number>;
+    setClickThrough?: (enabled: boolean) => Promise<boolean>;
     setContentProtection?: (enabled: boolean) => Promise<boolean>;
     getDesktopSourceId: () => Promise<string | undefined>;
     onAnswerNow?: (callback: () => void) => () => void;

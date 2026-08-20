@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("copilotWindow", {
   hide: () => ipcRenderer.invoke("window:hide"),
+  minimize: () => ipcRenderer.invoke("window:minimize"),
+  setAlwaysOnTop: (enabled: boolean) => ipcRenderer.invoke("window:set-always-on-top", enabled),
+  setOpacity: (opacity: number) => ipcRenderer.invoke("window:set-opacity", opacity),
+  setClickThrough: (enabled: boolean) => ipcRenderer.invoke("window:set-click-through", enabled),
   setContentProtection: (enabled: boolean) => ipcRenderer.invoke("window:set-content-protection", enabled),
   getDesktopSourceId: () => ipcRenderer.invoke("system-audio:get-source-id"),
   onAnswerNow: (callback: () => void) => {

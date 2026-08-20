@@ -151,6 +151,12 @@ export interface CopilotState {
   sessions: SessionConfig[];
   activeSession: Readonly<SessionConfig>;
   isSessionDrawerOpen: boolean;
+  compactMode: boolean;
+  isPinned: boolean;
+  opacityLevel: number;
+  isClickThrough: boolean;
+  activeHistoryIndex: number | null;
+  sessionStartTime: number | null;
   isContentProtected: boolean;
   error?: string;
   startListening: () => void;
@@ -160,6 +166,13 @@ export interface CopilotState {
   setHistoryOpen: (open: boolean) => void;
   setProfileOpen: (open: boolean) => void;
   setSessionDrawerOpen: (open: boolean) => void;
+  toggleCompactMode: () => void;
+  togglePin: () => Promise<void>;
+  setOpacityLevel: (opacity: number) => Promise<void>;
+  toggleClickThrough: () => Promise<void>;
+  navigateHistory: (direction: "prev" | "next" | "live") => void;
+  makeAnswerShorter: () => Promise<void>;
+  clearCurrentTurn: () => void;
   updateProfile: (profile: CandidateProfile) => void;
   createSession: (partial?: Partial<SessionConfig>) => SessionConfig;
   saveSession: (session: SessionConfig) => void;
@@ -1141,9 +1154,94 @@ export const useCopilotStore = create<CopilotState>((set, get) => {
     sessions: initialSessions,
     activeSession: snapshotSessionConfig(initialActiveSession),
     isSessionDrawerOpen: false,
+    compactMode: false,
+    isPinned: true,
+    opacityLevel: 1.0,
+    isClickThrough: false,
+    activeHistoryIndex: null,
+    sessionStartTime: null,
     isContentProtected: true,
     error: undefined,
     setSessionDrawerOpen: (open: boolean) => set({ isSessionDrawerOpen: open }),
+    toggleCompactMode: () => set((s) => ({ compactMode: !s.compactMode })),
+    togglePin: async () => {
+      const next = !get().isPinned;
+      if (window.copilotWindow?.setAlwaysOnTop) {
+        await window.copilotWindow.setAlwaysOnTop(next);
+      }
+      set({ isPinned: next });
+    },
+    setOpacityLevel: async (opacity: number) => {
+      if (window.copilotWindow?.setOpacity) {
+        await window.copilotWindow.setOpacity(opacity);
+      }
+      set({ opacityLevel: opacity });
+    },
+    toggleClickThrough: async () => {
+      const next = !get().isClickThrough;
+      if (window.copilotWindow?.setClickThrough) {
+        await window.copilotWindow.setClickThrough(next);
+      }
+      set({ isClickThrough: next });
+    },
+    navigateHistory: (direction: "prev" | "next" | "live") => {
+      const { history, activeHistoryIndex } = get();
+      if (direction === "live") {
+        set({ activeHistoryIndex: null });
+        return;
+      }
+      if (direction === "prev") {
+        if (history.length === 0) return;
+        if (activeHistoryIndex === null) {
+          set({ activeHistoryIndex: 0 });
+        } else if (activeHistoryIndex < history.length - 1) {
+          set({ activeHistoryIndex: activeHistoryIndex + 1 });
+        }
+        return;
+      }
+      if (direction === "next") {
+        if (activeHistoryIndex !== null) {
+          if (activeHistoryIndex > 0) {
+            set({ activeHistoryIndex: activeHistoryIndex - 1 });
+          } else {
+            set({ activeHistoryIndex: null });
+          }
+        }
+      }
+    },
+    makeAnswerShorter: async () => {
+      const currentAnswer = get().answer;
+      if (!currentAnswer.bullets || currentAnswer.bullets.length === 0) return;
+      const shorterOpening = currentAnswer.openingLine
+        ? currentAnswer.openingLine.split(/(?<=[.?!])\s+/)[0]
+        : currentAnswer.openingLine;
+      const shorterBullets = currentAnswer.bullets.slice(0, 2).map((b) => {
+        const sentences = b.split(/(?<=[.?!])\s+/);
+        return sentences[0] || b;
+      });
+      set({
+        answer: {
+          ...currentAnswer,
+          openingLine: shorterOpening,
+          bullets: shorterBullets
+        }
+      });
+    },
+    clearCurrentTurn: () => {
+      clearGraceWindow();
+      abortActiveSpeculative();
+      rawTurnSpeechBuffer = "";
+      correctedTurnSpeechBuffer = "";
+      set({
+        liveTranscript: "",
+        rawQuestion: "",
+        cleanedQuestion: "",
+        detectedTopic: "",
+        answer: emptyAnswer(),
+        activeHistoryIndex: null,
+        error: undefined
+      });
+    },
     createSession: (partial?: Partial<SessionConfig>) => {
       const newSession = createDefaultSessionConfig(partial);
       const updated = [newSession, ...get().sessions];

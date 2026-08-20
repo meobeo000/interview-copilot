@@ -103,6 +103,25 @@ app.whenReady().then(() => {
     mainWindow?.hide();
   });
 
+  ipcMain.handle("window:minimize", () => {
+    mainWindow?.minimize();
+  });
+
+  ipcMain.handle("window:set-always-on-top", (_event, enabled: boolean) => {
+    mainWindow?.setAlwaysOnTop(enabled, "screen-saver");
+    return enabled;
+  });
+
+  ipcMain.handle("window:set-opacity", (_event, opacity: number) => {
+    mainWindow?.setOpacity(opacity);
+    return opacity;
+  });
+
+  ipcMain.handle("window:set-click-through", (_event, enabled: boolean) => {
+    mainWindow?.setIgnoreMouseEvents(enabled, { forward: true });
+    return enabled;
+  });
+
   ipcMain.handle("window:set-content-protection", (_event, enabled: boolean) => {
     mainWindow?.setContentProtection(enabled);
     return enabled;
