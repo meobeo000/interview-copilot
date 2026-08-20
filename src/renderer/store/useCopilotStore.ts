@@ -28,6 +28,17 @@ import { RealStreamingSTTService } from "../../transcription/realStreamingSTT";
 import type { TranscriptionService } from "../../transcription/types";
 import { parseStreamingAnswer } from "../../llm/parseAnswerJson";
 import { type CandidateProfile, loadCandidateProfile, saveCandidateProfile } from "../../shared/candidateProfile";
+import {
+  type SessionConfig,
+  DEFAULT_SESSION_CONFIG,
+  createDefaultSessionConfig,
+  duplicateSessionConfig,
+  snapshotSessionConfig,
+  loadStoredSessions,
+  saveStoredSessions,
+  loadStoredActiveSessionId,
+  saveStoredActiveSessionId
+} from "../../shared/sessionConfig";
 import { buildAnswerContract, isContractCompatible, type AnswerContract } from "../../llm/answerContract";
 import { buildSafeFallbackAnswer } from "../../llm/fallbackAnswerBuilder";
 import {
@@ -137,6 +148,9 @@ export interface CopilotState {
   isHistoryOpen: boolean;
   candidateProfile: CandidateProfile;
   isProfileOpen: boolean;
+  sessions: SessionConfig[];
+  activeSession: Readonly<SessionConfig>;
+  isSessionDrawerOpen: boolean;
   isContentProtected: boolean;
   error?: string;
   startListening: () => void;
@@ -145,7 +159,14 @@ export interface CopilotState {
   toggleHistoryDrawer: () => void;
   setHistoryOpen: (open: boolean) => void;
   setProfileOpen: (open: boolean) => void;
+  setSessionDrawerOpen: (open: boolean) => void;
   updateProfile: (profile: CandidateProfile) => void;
+  createSession: (partial?: Partial<SessionConfig>) => SessionConfig;
+  saveSession: (session: SessionConfig) => void;
+  duplicateSession: (sessionId: string) => SessionConfig;
+  deleteSession: (sessionId: string) => void;
+  startSession: (session: SessionConfig) => void;
+  reopenSession: (sessionId: string) => void;
   toggleContentProtection: () => Promise<void>;
   regenerateAnswer: () => Promise<void>;
   generateAnswerForTurn: (turnId: string) => Promise<void>;
@@ -1097,22 +1118,98 @@ async function streamAnswerForItem(
   }
 }
 
-export const useCopilotStore = create<CopilotState>((set, get) => ({
-  status: "Idle",
-  audioLevel: 0,
-  liveTranscript: "",
-  rawQuestion: "",
-  cleanedQuestion: "",
-  detectedTopic: "",
-  questionConfidence: undefined,
-  intentCandidate: undefined,
-  answer: emptyAnswer(),
-  history: readHistory(),
-  isHistoryOpen: false,
-  candidateProfile: loadCandidateProfile(),
-  isProfileOpen: false,
-  isContentProtected: true,
-  error: undefined,
+export const useCopilotStore = create<CopilotState>((set, get) => {
+  const initialSessions = loadStoredSessions();
+  const initialActiveId = loadStoredActiveSessionId();
+  const initialActiveSession =
+    initialSessions.find((s) => s.id === initialActiveId) || initialSessions[0] || DEFAULT_SESSION_CONFIG;
+
+  return {
+    status: "Idle",
+    audioLevel: 0,
+    liveTranscript: "",
+    rawQuestion: "",
+    cleanedQuestion: "",
+    detectedTopic: "",
+    questionConfidence: undefined,
+    intentCandidate: undefined,
+    answer: emptyAnswer(),
+    history: readHistory(),
+    isHistoryOpen: false,
+    candidateProfile: loadCandidateProfile(),
+    isProfileOpen: false,
+    sessions: initialSessions,
+    activeSession: snapshotSessionConfig(initialActiveSession),
+    isSessionDrawerOpen: false,
+    isContentProtected: true,
+    error: undefined,
+    setSessionDrawerOpen: (open: boolean) => set({ isSessionDrawerOpen: open }),
+    createSession: (partial?: Partial<SessionConfig>) => {
+      const newSession = createDefaultSessionConfig(partial);
+      const updated = [newSession, ...get().sessions];
+      saveStoredSessions(updated);
+      set({ sessions: updated });
+      return newSession;
+    },
+    saveSession: (session: SessionConfig) => {
+      const exists = get().sessions.some((s) => s.id === session.id);
+      const updated = exists
+        ? get().sessions.map((s) => (s.id === session.id ? session : s))
+        : [session, ...get().sessions];
+      saveStoredSessions(updated);
+      const newActive =
+        get().activeSession.id === session.id
+          ? snapshotSessionConfig(session)
+          : get().activeSession;
+      set({ sessions: updated, activeSession: newActive });
+    },
+    duplicateSession: (sessionId: string) => {
+      const target = get().sessions.find((s) => s.id === sessionId) || get().activeSession;
+      const duplicated = duplicateSessionConfig(target);
+      const updated = [duplicated, ...get().sessions];
+      saveStoredSessions(updated);
+      set({ sessions: updated });
+      return duplicated;
+    },
+    deleteSession: (sessionId: string) => {
+      const updated = get().sessions.filter((s) => s.id !== sessionId);
+      if (updated.length === 0) {
+        updated.push(DEFAULT_SESSION_CONFIG);
+      }
+      saveStoredSessions(updated);
+      let newActive = get().activeSession;
+      if (newActive.id === sessionId) {
+        newActive = snapshotSessionConfig(updated[0]);
+        saveStoredActiveSessionId(newActive.id);
+      }
+      set({ sessions: updated, activeSession: newActive });
+    },
+    startSession: (session: SessionConfig) => {
+      const snapshot = snapshotSessionConfig(session);
+      saveStoredActiveSessionId(snapshot.id);
+      clearGraceWindow();
+      abortActiveSpeculative();
+      turnContextManager.reset();
+      smartDetector.reset();
+      resetTurnTelemetry();
+      activeItem = undefined;
+      rawTurnSpeechBuffer = "";
+      correctedTurnSpeechBuffer = "";
+      set({
+        activeSession: snapshot,
+        answer: emptyAnswer(),
+        liveTranscript: "",
+        rawQuestion: "",
+        cleanedQuestion: "",
+        error: undefined
+      });
+    },
+    reopenSession: (sessionId: string) => {
+      const target = get().sessions.find((s) => s.id === sessionId);
+      if (target) {
+        get().startSession(target);
+      }
+    },
   startListening: () => {
     transcriptController?.stop();
     clearGraceWindow();
@@ -1429,12 +1526,13 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     activeItem = newItem;
     await streamAnswerForItem(newItem, set, get);
   },
-  hideOverlay: async () => {
-    if (window.copilotWindow?.hide) {
-      await window.copilotWindow.hide();
+    hideOverlay: async () => {
+      if (window.copilotWindow?.hide) {
+        await window.copilotWindow.hide();
+      }
     }
-  }
-}));
+  };
+});
 
 export async function generateAnswerForTurn(
   turnId: string,

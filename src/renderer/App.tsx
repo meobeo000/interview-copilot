@@ -1,9 +1,10 @@
 import { useEffect } from "react";
-import { EyeOff, History, Pause, Play, RefreshCw, Shield, ShieldCheck, User, Zap } from "lucide-react";
+import { Briefcase, EyeOff, History, Pause, Play, RefreshCw, Shield, ShieldCheck, User, Zap } from "lucide-react";
 import { AnswerPanel } from "./components/AnswerPanel";
 import { AudioMeter } from "./components/AudioMeter";
 import { HistoryDrawer } from "./components/HistoryDrawer";
 import { ProfileDrawer } from "./components/ProfileDrawer";
+import { SessionDrawer } from "./components/SessionDrawer";
 import { QuestionPanel } from "./components/QuestionPanel";
 import { StatusPill } from "./components/StatusPill";
 import { TranscriptPanel } from "./components/TranscriptPanel";
@@ -44,6 +45,9 @@ export function App() {
     isHistoryOpen,
     candidateProfile,
     isProfileOpen,
+    sessions,
+    activeSession,
+    isSessionDrawerOpen,
     isContentProtected,
     error,
     startListening,
@@ -52,7 +56,13 @@ export function App() {
     toggleHistoryDrawer,
     setHistoryOpen,
     setProfileOpen,
+    setSessionDrawerOpen,
     updateProfile,
+    createSession,
+    saveSession,
+    duplicateSession,
+    deleteSession,
+    startSession,
     toggleContentProtection,
     regenerateAnswer,
     triggerDevDirectQuestion,
@@ -160,6 +170,17 @@ export function App() {
         <button
           type="button"
           className="history-button"
+          onClick={() => setSessionDrawerOpen(true)}
+          aria-label="Cấu hình phiên phỏng vấn"
+          title={`Phiên hiện tại: ${activeSession.name} (${activeSession.company})`}
+        >
+          <Briefcase size={16} />
+          <span>Phiên ({activeSession.company || "Setup"})</span>
+        </button>
+
+        <button
+          type="button"
+          className="history-button"
           onClick={() => setProfileOpen(true)}
           aria-label="Hồ sơ dự án thật"
           title="Xem & sửa hồ sơ kinh nghiệm / số liệu dự án thật"
@@ -239,6 +260,18 @@ export function App() {
         profile={candidateProfile}
         onClose={() => setProfileOpen(false)}
         onSave={updateProfile}
+      />
+
+      <SessionDrawer
+        isOpen={isSessionDrawerOpen}
+        sessions={sessions}
+        activeSession={activeSession}
+        onClose={() => setSessionDrawerOpen(false)}
+        onSelectAndStart={startSession}
+        onCreateSession={() => createSession()}
+        onSaveSession={saveSession}
+        onDuplicateSession={duplicateSession}
+        onDeleteSession={deleteSession}
       />
     </main>
   );
