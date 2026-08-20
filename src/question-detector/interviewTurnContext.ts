@@ -54,15 +54,25 @@ export interface FollowUpDetectionResult {
   rawPattern?: string;
 }
 
+import { InterviewContextGraph } from "./interviewContextGraph";
+
 /**
  * Manages minimal turn context snapshots for the interview.
  * Strictly bounded: stores ONLY current turn and immediately previous completed turn.
- * Also keeps an immutable snapshot index of all committed interview turns.
+ * Also keeps an immutable snapshot index of all committed interview turns and context graph.
  */
 export class InterviewTurnContextManager {
   private previousCompletedContext: InterviewTurnContext | null = null;
   private currentTurnContext: InterviewTurnContext | null = null;
   private committedTurns = new Map<string, CommittedInterviewTurn>();
+  private contextGraph = new InterviewContextGraph();
+
+  /**
+   * Returns the underlying context graph.
+   */
+  getContextGraph(): InterviewContextGraph {
+    return this.contextGraph;
+  }
 
   /**
    * Registers an immutable committed turn snapshot.
@@ -72,6 +82,15 @@ export class InterviewTurnContextManager {
       return;
     }
     this.committedTurns.set(turn.turnId, turn);
+    this.contextGraph.registerTurn({
+      turnId: turn.turnId,
+      questionText: turn.questionText,
+      intent: turn.intent,
+      entities: turn.entities,
+      numericFacts: turn.numericFacts,
+      isFollowUp: Boolean(turn.followUpContext?.contextResolved),
+      parentTurnId: turn.parentTurnId
+    });
   }
 
   /**
@@ -135,6 +154,7 @@ export class InterviewTurnContextManager {
     this.previousCompletedContext = null;
     this.currentTurnContext = null;
     this.committedTurns.clear();
+    this.contextGraph.reset();
   }
 }
 
