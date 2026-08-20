@@ -2,11 +2,11 @@ import { create } from "zustand";
 import { MockAudioCapture } from "../../audio/mockAudioCapture";
 import { SystemAudioCapture } from "../../audio/systemAudioCapture";
 import type { AudioCapture, AudioFrame } from "../../audio/types";
-import { ContextAwareTranscriptCorrector } from "../../corrector/contextAwareCorrector";
 import { createAnswerService } from "../../llm/factory.browser";
 import type { AnswerDelta } from "../../llm/types";
 import type { QuestionIntent, QuestionIntentCategory } from "../../question-detector/intentClassifier";
 import { type IntentCandidateEvent, SmartQuestionDetector } from "../../question-detector/smartQuestionDetector";
+import { SemanticQuestionReconstructor } from "../../question-detector/semanticQuestionReconstructor";
 import { isSpeculativeEnabled } from "../../question-detector/speculativeConfig";
 import { SpeculativePrewarmPolicy, type PrewarmEligibilityResult } from "../../question-detector/speculativePrewarmPolicy";
 import type { SemanticEvidenceState } from "../../question-detector/semanticEvidence";
@@ -255,7 +255,7 @@ function logSpeculativePrewarmEvent(payload: SpeculativePrewarmLogPayload) {
 const answerService = createAnswerService();
 const audioCapture = createAudioCapture();
 const smartDetector = new SmartQuestionDetector();
-const corrector = new ContextAwareTranscriptCorrector();
+const semanticReconstructor = new SemanticQuestionReconstructor();
 const prewarmPolicy = new SpeculativePrewarmPolicy();
 export const turnContextManager = new InterviewTurnContextManager();
 
@@ -368,8 +368,13 @@ function handleTranscriptUpdate(
   get: () => CopilotState
 ) {
   rawTurnSpeechBuffer = rawText;
-  const correctionResult = corrector.correct(rawText, { domain: "seo_igaming_interview" });
-  correctedTurnSpeechBuffer = correctionResult.correctedText;
+  const previousCtx = turnContextManager.getPreviousCompletedContext();
+  const reconstruction = semanticReconstructor.reconstruct(rawText, {
+    priorContext: previousCtx,
+    priorIntent: previousCtx?.intent,
+    priorEntities: previousCtx?.entities
+  });
+  correctedTurnSpeechBuffer = reconstruction.interpretedQuestion;
 
   const currentStatus = get().status;
 
@@ -662,16 +667,25 @@ function commitQuestion(
   }
 
   clearGraceWindow();
-  const correctedText = questionText.trim();
-  if (!correctedText) {
+  if (!questionText.trim()) {
     return;
   }
 
   const commitTime = Date.now();
-  const rawText = rawTurnSpeechBuffer.trim() || correctedText;
+  const rawText = rawTurnSpeechBuffer.trim() || questionText.trim();
+  const prevContext = turnContextManager.getPreviousCompletedContext();
   const evidenceSnapshot = snapshotSemanticEvidence(smartDetector.getEvidenceState());
-  const finalIntent = smartDetector.detectIntent(correctedText, rawText);
   const finalTurnId = evidenceSnapshot.turnId || crypto.randomUUID();
+
+  const reconstruction = semanticReconstructor.reconstruct(rawText, {
+    turnId: finalTurnId,
+    priorContext: prevContext,
+    priorIntent: prevContext?.intent,
+    priorEntities: prevContext?.entities
+  });
+  const correctedText = reconstruction.interpretedQuestion;
+
+  const finalIntent = smartDetector.detectIntent(correctedText, rawText);
   const speechEndedAt = providerSpeechEndedAt ?? turnSpeechEndedAt;
   const speechLastActivityAt = turnSpeechLastActivityAt;
   const lastSttPartialAt = turnLastSttPartialAt;
@@ -1461,13 +1475,18 @@ export const useCopilotStore = create<CopilotState>((set, get) => {
     resetTurnTelemetry();
 
     const rawText = questionText;
-    const correctionResult = corrector.correct(rawText, { domain: "seo_igaming_interview" });
-    const correctedText = correctionResult.correctedText;
+    const finalTurnId = crypto.randomUUID();
+    const previousContext = turnContextManager.getPreviousCompletedContext();
+    const reconstruction = semanticReconstructor.reconstruct(rawText, {
+      turnId: finalTurnId,
+      priorContext: previousContext,
+      priorIntent: previousContext?.intent,
+      priorEntities: previousContext?.entities
+    });
+    const correctedText = reconstruction.interpretedQuestion;
     const finalIntent = smartDetector.detectIntent(correctedText, rawText);
     const commitTime = Date.now();
-    const finalTurnId = crypto.randomUUID();
 
-    const previousContext = turnContextManager.getPreviousCompletedContext();
     const followUpContext = resolveFollowUpContext(
       correctedText,
       previousContext,
@@ -1546,13 +1565,18 @@ export const useCopilotStore = create<CopilotState>((set, get) => {
     resetTurnTelemetry();
 
     const rawText = questionText;
-    const correctionResult = corrector.correct(rawText, { domain: "seo_igaming_interview" });
-    const correctedText = correctionResult.correctedText;
+    const finalTurnId = crypto.randomUUID();
+    const previousContext = turnContextManager.getPreviousCompletedContext();
+    const reconstruction = semanticReconstructor.reconstruct(rawText, {
+      turnId: finalTurnId,
+      priorContext: previousContext,
+      priorIntent: previousContext?.intent,
+      priorEntities: previousContext?.entities
+    });
+    const correctedText = reconstruction.interpretedQuestion;
     const finalIntent = smartDetector.detectIntent(correctedText, rawText);
     const commitTime = Date.now();
-    const finalTurnId = crypto.randomUUID();
 
-    const previousContext = turnContextManager.getPreviousCompletedContext();
     const followUpContext = resolveFollowUpContext(
       correctedText,
       previousContext,
