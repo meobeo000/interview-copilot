@@ -22,9 +22,10 @@
     "diagnostic:phase64-live-gate": "npx tsx src/diagnostics/phase64LiveGateDiagnostic.ts",
     "diagnostic:fallback-safety": "npx tsx src/diagnostics/fallbackSafetyDiagnostic.ts",
     "diagnostic:practitioner-grounding": "npx tsx src/diagnostics/practitionerGroundingDiagnostic.ts",
-    "diagnostic:practitioner-playbook": "npx tsx src/diagnostics/practitionerPlaybookDiagnostic.ts",
+    "diagnostic:deterministic": "npx tsx src/diagnostics/turnAssemblyDiagnostic.ts && npx tsx src/diagnostics/answerContractDiagnostic.ts && npx tsx src/diagnostics/pipelineCorrectnessDiagnostic.ts && npx tsx src/diagnostics/followUpContextDiagnostic.ts && npx tsx src/diagnostics/intentRoutingDiagnostic.ts && npx tsx src/diagnostics/fallbackSafetyDiagnostic.ts && npx tsx src/diagnostics/practitionerGroundingDiagnostic.ts && npx tsx src/diagnostics/practitionerPlaybookDiagnostic.ts",
     "test": "vitest run",
-    "build": "tsc -p tsconfig.node.json && vite build"
+    "build": "tsc -p tsconfig.node.json && vite build",
+    "regression:gate": "npm run typecheck && npm run lint && npm run test && npm run build && npm run diagnostic:deterministic"
   },
   "dependencies": {
     "@google-cloud/speech": "^7.5.0",

@@ -1,0 +1,482 @@
+INTERVIEW COPILOT — MASTER PRODUCT ROADMAP
+
+Execution plan for AI coding agents • Phase-by-phase • Scope-locked
+
+1. Product Direction
+
+Build a specialist real-time interview copilot that combines a simple pre-interview setup, a minimal live interview HUD, robust speech/question understanding, strict turn isolation, domain-specific practitioner knowledge, and candidate-fact safety.
+
+Primary product principle: setup complexity belongs before the interview; live complexity must disappear during the interview.
+
+2. Target User Flow
+
+Dashboard → Create Session → Pre-flight → Live Interview HUD → Question Understanding → Answer Engine → Turn/Context Management → Post-interview Review
+
+3. Engine Pipeline
+
+Audio → STT → Question Boundary Detection → Semantic Question Reconstruction → Turn Commit → Context Resolution → Knowledge Retrieval → Answer Generation → Fact Safety → Live HUD
+
+4. Non-Negotiable Existing Invariants
+
+CommittedInterviewTurn remains immutable after COMMIT_FINAL.
+
+Every committed turn has a unique turnId.
+
+Every answer request belongs to exactly one turnId/requestId.
+
+Late responses cannot overwrite another active turn.
+
+Manual Answer must resolve the immutable committed-turn snapshot.
+
+Future transcript must never leak into an earlier answer request.
+
+Follow-up inheritance must be explicit; unrelated topic switches clear scenario context.
+
+5. Execution Roadmap
+
+PHASE 0 — Freeze Baseline & Regression Gate
+
+Goal: protect the working engine before adding product features.
+
+Scope:
+
+Capture current test baseline and diagnostics.
+
+Lock turn isolation, manual answer safety, follow-up inheritance and response ownership.
+
+Create a mandatory regression command/checklist for every later phase.
+
+DO NOT TOUCH:
+
+STT behavior
+
+Answer prompting
+
+Retrieval logic
+
+Turn isolation architecture unless a failing regression proves it is necessary
+
+Acceptance:
+
+Existing test/typecheck/lint/build gates remain green.
+
+A documented baseline exists.
+
+Every later phase must run this regression gate before completion.
+
+PHASE 1 — Create Session
+
+Goal: introduce a clean pre-interview configuration workflow.
+
+Session setup:
+
+Session Type: Interview / Regular Call
+
+Company
+
+Job Description
+
+Resume
+
+Knowledge Documents / Practitioner Playbooks
+
+Custom Instructions
+
+Question Type: Technical / Behavioral / Situational
+
+Answer Format: Full Script / Script + Bullets / Bullets
+
+Length: Short / Balanced / Long
+
+Tone: Simple / Formal
+
+STAR Method toggle where relevant
+
+Model
+
+Language
+
+Auto Answer
+
+Save Transcript
+
+Architecture:
+
+Create a SessionConfig model.
+
+Session starts from an immutable/snapshotted configuration.
+
+Resume/Documents/Instructions are scoped to the session.
+
+Allow reopen and duplicate session.
+
+DO NOT TOUCH:
+
+STT
+
+QuestionCommitGate
+
+Context classifier
+
+Answer reasoning
+
+Turn isolation
+
+Acceptance:
+
+Create, save, reopen and duplicate a session.
+
+Session settings persist after app restart.
+
+Starting a session uses exactly the selected configuration.
+
+No engine regressions.
+
+PHASE 2 — Live Interview HUD
+
+Goal: create a low-cognitive-load floating interface for the real interview.
+
+Default HUD:
+
+Listening / paused state
+
+Session timer
+
+Current interpreted question
+
+Suggested answer
+
+Answer
+
+Regenerate
+
+Shorter
+
+Clear
+
+Previous / Next turn
+
+Window controls:
+
+Pin
+
+Resize
+
+Opacity
+
+Hide
+
+Compact mode
+
+Keyboard shortcuts
+
+Optional click-through mode
+
+Optional later actions:
+
+Screenshot
+
+Chat
+
+Rules:
+
+Do not expose developer diagnostics by default.
+
+Do not place complex session settings in the HUD.
+
+Learn from successful interview-overlay interaction patterns, but do not copy another product's branding, exact layout, icons, colors, typography or pixel design.
+
+Acceptance:
+
+Usable at small overlay size.
+
+Keyboard-first operation works.
+
+Manual Answer remains bound to the correct turnId.
+
+Late responses remain attached to their original turn.
+
+No regression in current engine.
+
+PHASE 3 — Semantic Question Reconstruction
+
+Goal: recover interviewer intent when STT is imperfect.
+
+Pipeline:
+
+RAW TRANSCRIPT → RECONSTRUCTION → INTERPRETED QUESTION → CONFIDENCE → COMMIT
+
+Example:
+
+Raw: “Tại sao em không chọn Romania?”
+
+Prior context: Domain A vs Domain B
+
+Interpreted: “Tại sao em không chọn Domain A?”
+
+Confidence: 0.96
+
+Policy:
+
+High confidence: allow semantic correction.
+
+Medium confidence: preserve raw text and candidate interpretation.
+
+Low confidence: do not silently rewrite.
+
+Reconstruction must use bounded context and known entities.
+
+Never let the reconstruction model invent a new scenario.
+
+Developer telemetry:
+
+rawTranscript
+
+interpretedQuestion
+
+reconstructionConfidence
+
+evidence/linked entities
+
+turnId
+
+Acceptance:
+
+Robust entity recovery in adversarial STT cases.
+
+No silent high-impact correction at low confidence.
+
+Regression tests for domain/entity/numeric corrections.
+
+No contamination across turns.
+
+PHASE 4 — Interview Context Graph
+
+Goal: move from simple previous-turn memory to explicit scenario-aware interview memory.
+
+Models:
+
+scenarioId
+
+turnId
+
+parentTurnId
+
+referencedTurnIds
+
+scenario facts/entities
+
+explicit topic-switch boundary
+
+Behavior:
+
+“Tại sao?” inherits only the required parent scenario.
+
+“Còn backlink?” resolves the correct prior subject.
+
+A new budget/PBN/GSC scenario does not inherit expired-domain facts.
+
+Interviewer references such as “con A”, “case lúc nãy”, “mốc ngày 10” resolve to explicit prior claims where confidence is sufficient.
+
+Acceptance:
+
+Multi-turn scenario tests.
+
+Topic-switch isolation.
+
+Correct parent resolution for short follow-ups.
+
+Zero unrelated scenario-fact leakage.
+
+PHASE 5 — Answer Grounding & Fact Safety
+
+Goal: make answers practical without turning risk signals into invented facts or invented candidate experience.
+
+Fact provenance:
+
+INTERVIEWER_FACT
+
+RESUME_FACT
+
+PRACTITIONER_DOCUMENT
+
+GENERAL_KNOWLEDGE
+
+INFERENCE
+
+UNSUPPORTED_CANDIDATE_CLAIM
+
+Rules:
+
+Risk signal ≠ proven penalty.
+
+Practitioner experience ≠ candidate personal experience.
+
+Never invent metrics, budgets, rankings, dates, projects or achievements.
+
+If evidence is insufficient, state the next verification rather than inventing the missing fact.
+
+Answer actions:
+
+Shorter
+
+More Technical
+
+Explain Why
+
+Give Example
+
+Defend Answer
+
+Regenerate
+
+All actions regenerate the same immutable turn snapshot.
+
+Acceptance:
+
+Candidate Fact Firewall tests.
+
+Unsupported-claim tests.
+
+Contradiction tests.
+
+Answer action tests preserve turn ownership.
+
+PHASE 6 — Advanced Live Interview UX
+
+Goal: improve real-world usability after the core is stable.
+
+Candidate features:
+
+Speaker separation
+
+Interviewer challenge detection
+
+Interruption handling
+
+Natural-pause confidence
+
+Answer-ready indicator
+
+Near-camera positioning
+
+Multi-monitor behavior
+
+Compact / discreet mode
+
+Better shortcut customization
+
+Challenge detection example:
+
+“PBN là gì?” → knowledge explanation
+
+“Anh không đồng ý, site chưa có traffic mà em đi PBN để làm gì?” → defend/reason response
+
+Acceptance:
+
+Features are individually gated.
+
+No feature may weaken turn isolation or question-boundary correctness.
+
+PHASE 7 — Post-Interview Intelligence
+
+Goal: turn each interview into feedback for the next one.
+
+Review:
+
+Transcript
+
+Questions and answers
+
+Weak answers
+
+Regenerated answers
+
+Misheard/reconstructed questions
+
+Unsupported claims
+
+Interviewer challenges
+
+Knowledge gaps
+
+Suggested practitioner-playbook improvements
+
+Latency summary
+
+Feedback loop:
+
+Interview → detect weakness → review → improve playbook/config → next interview
+
+Acceptance:
+
+Review data is derived from recorded session events.
+
+Never fabricate interview events or missing transcript.
+
+6. Developer Mode
+
+Developer Mode is separate from the production interview HUD.
+
+Raw transcript
+
+Interpreted question
+
+STT / reconstruction confidence
+
+turnId / parentTurnId / scenarioId
+
+Intent
+
+Retrieved sources and provenance
+
+RequestId
+
+STT / reconstruction / retrieval / LLM / total latency
+
+Commit / hold / cancellation / render telemetry
+
+7. Mandatory AI-Agent Task Template
+
+Every coding-agent task must contain these sections. Do not give the agent broad prompts such as “make it like Parakeet and improve context.”
+
+GOAL
+One concrete outcome only.
+
+SCOPE
+Exact files/components/behaviors allowed to change.
+
+DO NOT TOUCH
+Explicit protected subsystems.
+
+IMPLEMENTATION CONSTRAINTS
+Existing invariants that must remain true.
+
+ACCEPTANCE CRITERIA
+Observable behavior required for completion.
+
+REGRESSION GATE
+Tests, typecheck, lint, build and diagnostics that must pass.
+
+REPORT
+Root cause/implementation summary, changed files, tests added, before/after evidence, git status.
+
+IMPORTANT
+First audit the existing implementation and report a minimal plan.
+Do not begin broad refactoring.
+Do not add unrelated features.
+Do not declare COMPLETE until acceptance criteria and regression gates pass.
+
+8. Recommended Execution Order
+
+Execute strictly in this order: Phase 0 → Phase 1 → Phase 2 → live regression test → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7.
+
+Do not combine Phase 1 and Phase 3, or Phase 2 and Phase 5, in a single coding task. Finish, verify and commit each phase before starting the next.
+
+9. Immediate Next Action
+
+Give this document to the coding agent and ask it to read the entire roadmap. Then instruct it to execute PHASE 0 only. After the Phase 0 report is reviewed and accepted, issue a separate instruction for PHASE 1. Repeat phase by phase.
+
+10. Product North Star
+
+Hear the right question → understand the right context → generate a grounded answer → show it with minimal cognitive load during the live interview.
