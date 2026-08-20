@@ -36,21 +36,21 @@ contextBridge.exposeInMainWorld("copilotWindow", {
     }
   },
   answer: {
-    generateAnswer: (request: { questionId: string; question: string; rawTranscript: string; profile?: unknown; intent?: unknown }) =>
+    generateAnswer: (request: { questionId: string; turnId?: string; question: string; rawTranscript: string; profile?: unknown; intent?: unknown }) =>
       ipcRenderer.invoke("answer:generate", request),
     cancelAnswer: (questionId?: string) => ipcRenderer.invoke("answer:cancel", questionId),
-    onChunk: (callback: (payload: { questionId: string; accumulatedText: string }) => void) => {
-      const listener = (_event: unknown, payload: { questionId: string; accumulatedText: string }) => callback(payload);
+    onChunk: (callback: (payload: { questionId: string; turnId?: string; accumulatedText: string }) => void) => {
+      const listener = (_event: unknown, payload: { questionId: string; turnId?: string; accumulatedText: string }) => callback(payload);
       ipcRenderer.on("answer:chunk", listener);
       return () => ipcRenderer.removeListener("answer:chunk", listener);
     },
-    onComplete: (callback: (payload: { questionId: string; answer: unknown }) => void) => {
-      const listener = (_event: unknown, payload: { questionId: string; answer: unknown }) => callback(payload);
+    onComplete: (callback: (payload: { questionId: string; turnId?: string; answer: unknown }) => void) => {
+      const listener = (_event: unknown, payload: { questionId: string; turnId?: string; answer: unknown }) => callback(payload);
       ipcRenderer.on("answer:complete", listener);
       return () => ipcRenderer.removeListener("answer:complete", listener);
     },
-    onError: (callback: (payload: { questionId: string; error: string }) => void) => {
-      const listener = (_event: unknown, payload: { questionId: string; error: string }) => callback(payload);
+    onError: (callback: (payload: { questionId: string; turnId?: string; error: string }) => void) => {
+      const listener = (_event: unknown, payload: { questionId: string; turnId?: string; error: string }) => callback(payload);
       ipcRenderer.on("answer:error", listener);
       return () => ipcRenderer.removeListener("answer:error", listener);
     }

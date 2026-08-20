@@ -1,6 +1,7 @@
 import type { QuestionIntentCategory } from "./intentClassifier";
 import type { ScenarioConstraints } from "./scenarioConstraints";
 import type { AnswerContractType } from "../llm/answerContract";
+import type { CommittedInterviewTurn } from "./committedTurn";
 
 export type FollowUpType =
   | "WHY"
@@ -56,10 +57,36 @@ export interface FollowUpDetectionResult {
 /**
  * Manages minimal turn context snapshots for the interview.
  * Strictly bounded: stores ONLY current turn and immediately previous completed turn.
+ * Also keeps an immutable snapshot index of all committed interview turns.
  */
 export class InterviewTurnContextManager {
   private previousCompletedContext: InterviewTurnContext | null = null;
   private currentTurnContext: InterviewTurnContext | null = null;
+  private committedTurns = new Map<string, CommittedInterviewTurn>();
+
+  /**
+   * Registers an immutable committed turn snapshot.
+   */
+  recordCommittedTurn(turn: CommittedInterviewTurn): void {
+    if (!turn || !turn.turnId) {
+      return;
+    }
+    this.committedTurns.set(turn.turnId, turn);
+  }
+
+  /**
+   * Resolves an immutable committed turn snapshot by turnId.
+   */
+  getCommittedTurn(turnId: string): CommittedInterviewTurn | undefined {
+    return this.committedTurns.get(turnId);
+  }
+
+  /**
+   * Returns all recorded committed turns in chronological insertion order.
+   */
+  getAllCommittedTurns(): CommittedInterviewTurn[] {
+    return Array.from(this.committedTurns.values());
+  }
 
   /**
    * Records a completed turn after a valid answer session is finalized.
@@ -107,5 +134,7 @@ export class InterviewTurnContextManager {
   reset(): void {
     this.previousCompletedContext = null;
     this.currentTurnContext = null;
+    this.committedTurns.clear();
   }
 }
+

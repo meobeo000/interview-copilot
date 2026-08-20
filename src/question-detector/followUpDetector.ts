@@ -83,19 +83,24 @@ export function detectFollowUp(
     return { detected: false };
   }
 
-  // 1. DECISION_REASON (e.g. "Vì sao em chọn domain B?", "Tại sao chọn con B?", "Vì sao chọn B?")
+  // 1. DECISION_REASON (e.g. "Vì sao em chọn domain B?", "Tại sao không chọn con A?", "Tại sao chọn con B?", "Vì sao chọn B?")
   const decisionReasonMatch = lower.match(
-    /(?:vì sao|tại sao|sao|lý do gì)\s*(?:em\s*)?(?:lại\s*)?(?:chọn|lấy|mua|ưu tiên)\s*(?:domain [ab]|con [ab]|site [ab]|\b[ab]\b)/i
+    /(?:vì sao|tại sao|sao|lý do gì)\s*(?:em\s*)?(?:lại\s*)?(?:không\s+|chưa\s+)?(?:chọn|lấy|mua|ưu tiên|dùng)\s*(?:domain\s+[a-d0-9]|con\s+[a-d0-9]|site\s+[a-d0-9]|\b[a-d](?:\s|$))/i
   );
   if (decisionReasonMatch) {
-    const choiceMatch = lower.match(/(?:domain|con|site)\s*([ab])|\b([ab])\b/i);
-    const targetEntity = choiceMatch ? `domain ${(choiceMatch[1] || choiceMatch[2]).toUpperCase()}` : undefined;
-    return {
-      detected: true,
-      type: "DECISION_REASON",
-      targetEntity,
-      rawPattern: decisionReasonMatch[0]
-    };
+    const choiceMatch = lower.match(
+      /(?:domain|con|site)\s*([a-d0-9])|(?:\bchọn|\blấy|\bmua|\bưu tiên|\bkhông chọn|\bchưa chọn)\s+([a-d])(?:\s|$)/i
+    );
+    const choice = (choiceMatch?.[1] || choiceMatch?.[2])?.toUpperCase();
+    if (choice) {
+      const targetEntity = `domain ${choice}`;
+      return {
+        detected: true,
+        type: "DECISION_REASON",
+        targetEntity,
+        rawPattern: decisionReasonMatch[0]
+      };
+    }
   }
 
   // 2. WHY (e.g. "Tại sao?", "Vì sao?", "Sao?", "Tại sao lại như vậy?", "Vì sao em chọn cách đó?")
@@ -168,7 +173,7 @@ export function detectFollowUp(
     };
   }
 
-  // 5. FAILURE_NEXT_STEP (e.g. "Nếu vẫn không lên thì sao?", "Nếu vẫn tụt thì sao?", "Vậy bước tiếp theo là gì?")
+  // 5. FAILURE_NEXT_STEP (e.g. "Nếu vẫn không lên thì sao?", "Nếu CTR vẫn thấp thì sao?", "Vậy bước tiếp theo là gì?")
   const failurePatterns = [
     "nếu vẫn không lên thì sao",
     "nếu không lên thì sao",
@@ -190,7 +195,10 @@ export function detectFollowUp(
     "bước tiếp theo làm gì",
     "tiếp theo là gì"
   ];
-  if (failurePatterns.includes(lower) || failurePatterns.some((fp) => lower.includes(fp) || lower === fp)) {
+  const isConditionalFailure = Boolean(
+    lower.match(/^nếu\s+(?:vẫn\s+)?(?:không\s+|chưa\s+|tụt\s+|thấp\s+|kém\s+|lỗi\s+|mất\s+|ctr\s+|traffic\s+).+?\s+thì\s+sao$/i)
+  );
+  if (isConditionalFailure || failurePatterns.includes(lower) || failurePatterns.some((fp) => lower.includes(fp) || lower === fp)) {
     return {
       detected: true,
       type: "FAILURE_NEXT_STEP",

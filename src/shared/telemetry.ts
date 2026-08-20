@@ -193,3 +193,142 @@ function isValidAnswerText(text: string): boolean {
   }
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// Strict Turn Isolation & Manual Answer Telemetry
+// ---------------------------------------------------------------------------
+
+export interface TurnCreatedLogPayload {
+  turnId: string;
+  timestamp: number;
+  hash: string;
+}
+
+export interface TurnCommittedLogPayload {
+  turnId: string;
+  questionText: string;
+  intent: string;
+  questionShape: string;
+  hash: string;
+  parentTurnId?: string;
+}
+
+export interface ManualAnswerRequestedLogPayload {
+  turnId: string;
+  requestId?: string;
+  requestedAt: number;
+  questionHash?: string;
+}
+
+export interface AnswerContextBuiltLogPayload {
+  turnId: string;
+  requestId?: string;
+  entityCount: number;
+  factCount: number;
+  parentTurnId?: string;
+  inheritedIntent?: string;
+}
+
+export interface GeminiRequestStartedLogPayload {
+  turnId: string;
+  requestId: string;
+  model: string;
+  provider: string;
+  questionHash?: string;
+}
+
+export interface GeminiResponseReceivedLogPayload {
+  turnId: string;
+  requestId: string;
+  status: string;
+  elapsedMs: number;
+}
+
+export interface AnswerAttachedToTurnLogPayload {
+  turnId: string;
+  requestId: string;
+  attachedTurnId: string;
+  match: boolean;
+}
+
+function shouldLogTurnTelemetry(): boolean {
+  if (typeof process !== "undefined" && process.env?.NODE_ENV === "test") {
+    return false;
+  }
+  return true;
+}
+
+export function logTurnCreated(payload: TurnCreatedLogPayload): void {
+  if (!shouldLogTurnTelemetry()) return;
+  console.log(`[TURN_CREATED]\nturnId: ${payload.turnId}\nhash: ${payload.hash}\ntimestamp: ${payload.timestamp}`);
+}
+
+export function logTurnCommitted(payload: TurnCommittedLogPayload): void {
+  if (!shouldLogTurnTelemetry()) return;
+  const lines = [
+    "[TURN_COMMITTED]",
+    `turnId: ${payload.turnId}`,
+    `questionText: "${payload.questionText}"`,
+    `intent: ${payload.intent}`,
+    `questionShape: ${payload.questionShape}`,
+    `hash: ${payload.hash}`
+  ];
+  if (payload.parentTurnId) {
+    lines.push(`parentTurnId: ${payload.parentTurnId}`);
+  }
+  console.log(lines.join("\n"));
+}
+
+export function logManualAnswerRequested(payload: ManualAnswerRequestedLogPayload): void {
+  if (!shouldLogTurnTelemetry()) return;
+  const lines = [
+    "[MANUAL_ANSWER_REQUESTED]",
+    `turnId: ${payload.turnId}`,
+    `requestedAt: ${payload.requestedAt}`
+  ];
+  if (payload.requestId) lines.push(`requestId: ${payload.requestId}`);
+  if (payload.questionHash) lines.push(`questionHash: ${payload.questionHash}`);
+  console.log(lines.join("\n"));
+}
+
+export function logAnswerContextBuilt(payload: AnswerContextBuiltLogPayload): void {
+  if (!shouldLogTurnTelemetry()) return;
+  const lines = [
+    "[ANSWER_CONTEXT_BUILT]",
+    `turnId: ${payload.turnId}`,
+    `entityCount: ${payload.entityCount}`,
+    `factCount: ${payload.factCount}`
+  ];
+  if (payload.requestId) lines.push(`requestId: ${payload.requestId}`);
+  if (payload.parentTurnId) lines.push(`parentTurnId: ${payload.parentTurnId}`);
+  if (payload.inheritedIntent) lines.push(`inheritedIntent: ${payload.inheritedIntent}`);
+  console.log(lines.join("\n"));
+}
+
+export function logGeminiRequestStarted(payload: GeminiRequestStartedLogPayload): void {
+  if (!shouldLogTurnTelemetry()) return;
+  const lines = [
+    "[GEMINI_REQUEST_STARTED]",
+    `turnId: ${payload.turnId}`,
+    `requestId: ${payload.requestId}`,
+    `provider: ${payload.provider}`,
+    `model: ${payload.model}`
+  ];
+  if (payload.questionHash) lines.push(`questionHash: ${payload.questionHash}`);
+  console.log(lines.join("\n"));
+}
+
+export function logGeminiResponseReceived(payload: GeminiResponseReceivedLogPayload): void {
+  if (!shouldLogTurnTelemetry()) return;
+  console.log(
+    `[GEMINI_RESPONSE_RECEIVED]\nturnId: ${payload.turnId}\nrequestId: ${payload.requestId}\nstatus: ${payload.status}\nelapsedMs: ${payload.elapsedMs} ms`
+  );
+}
+
+export function logAnswerAttachedToTurn(payload: AnswerAttachedToTurnLogPayload): void {
+  if (!shouldLogTurnTelemetry()) return;
+  console.log(
+    `[ANSWER_ATTACHED_TO_TURN]\nturnId: ${payload.turnId}\nrequestId: ${payload.requestId}\nattachedTurnId: ${payload.attachedTurnId}\nmatch: ${payload.match}`
+  );
+}
+

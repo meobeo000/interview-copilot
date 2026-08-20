@@ -1,6 +1,13 @@
 import type { AnswerDelta, AnswerRequest, AnswerService } from "./types";
 import type { SuggestedAnswer } from "../shared/types";
-import { calculatePipelineMetrics, extractFirstUsefulAnswer, formatPipelineMetricsLog } from "../shared/telemetry";
+import {
+  calculatePipelineMetrics,
+  extractFirstUsefulAnswer,
+  formatPipelineMetricsLog,
+  logAnswerContextBuilt,
+  logGeminiRequestStarted,
+  logGeminiResponseReceived
+} from "../shared/telemetry";
 import { buildFastSeoInterviewPrompt } from "./prompts/fastSeoInterviewPrompt";
 import { parseStreamingAnswer } from "./parseAnswerJson";
 import { AnswerTraceLogger } from "../shared/answerTrace";
@@ -84,6 +91,15 @@ export class GeminiAnswerService implements AnswerService {
       });
     const contextBuildElapsedMs = Math.max(0, Date.now() - contextBuildStart);
 
+    logAnswerContextBuilt({
+      turnId: request.turnId || request.questionId,
+      requestId: request.questionId,
+      entityCount: contract.requiredEntities.length,
+      factCount: contract.requiredFacts.length,
+      parentTurnId: contract.followUpContext?.previousTurnId,
+      inheritedIntent: contract.followUpContext?.inheritedIntent
+    });
+
     if (typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
       console.log(
         `[ANSWER CONTRACT]\nquestionId: ${request.questionId}\nintent: ${contract.intent}\nanswerType: ${contract.answerType}\ncandidateExperienceAllowed: ${contract.candidateExperienceAllowed}\ncandidateExperienceTopics: ${JSON.stringify(contract.candidateExperience.supportedTopics)}\nallocationGrounding: ${contract.allocationGrounding ?? "N/A"}\ngroundedFactCount: ${contract.groundedFacts.length}\ngroundedSourceTypes: ${JSON.stringify(Array.from(new Set(contract.groundedFacts.map((f) => f.sourceType))))}\nrequiredEntities: ${JSON.stringify(contract.requiredEntities)}\ncontractBuildMs: ${contract.contractBuildMs} ms`
@@ -117,6 +133,13 @@ export class GeminiAnswerService implements AnswerService {
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.modelName)}:streamGenerateContent?alt=sse`;
 
+    logGeminiRequestStarted({
+      turnId: request.turnId || request.questionId,
+      requestId: request.questionId,
+      provider: "gemini",
+      model: this.modelName
+    });
+
     AnswerTraceLogger.record(request.questionId, {
       requestSent: Date.now(),
       provider: "gemini",
@@ -149,6 +172,13 @@ export class GeminiAnswerService implements AnswerService {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Gemini Network error: ${msg.replace(this.apiKey, "[REDACTED]")}`);
     }
+
+    logGeminiResponseReceived({
+      turnId: request.turnId || request.questionId,
+      requestId: request.questionId,
+      status: String(response.status),
+      elapsedMs: Date.now() - geminiRequestStartedAt
+    });
 
     AnswerTraceLogger.record(request.questionId, {
       httpResponse: { status: response.status, time: Date.now() }

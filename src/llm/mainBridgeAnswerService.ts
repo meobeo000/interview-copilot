@@ -7,6 +7,7 @@ type GlobalWindow = {
     answer?: {
       generateAnswer: (req: {
         questionId: string;
+        turnId?: string;
         question: string;
         rawTranscript: string;
         questionCommittedAt?: number;
@@ -17,9 +18,9 @@ type GlobalWindow = {
         intent?: unknown;
       }) => Promise<void>;
       cancelAnswer: (questionId?: string) => Promise<void>;
-      onChunk: (cb: (payload: { questionId: string; accumulatedText: string }) => void) => () => void;
-      onComplete: (cb: (payload: { questionId: string; answer: unknown }) => void) => () => void;
-      onError: (cb: (payload: { questionId: string; error: string }) => void) => () => void;
+      onChunk: (cb: (payload: { questionId: string; turnId?: string; accumulatedText: string }) => void) => () => void;
+      onComplete: (cb: (payload: { questionId: string; turnId?: string; answer: unknown }) => void) => () => void;
+      onError: (cb: (payload: { questionId: string; turnId?: string; error: string }) => void) => () => void;
     };
   };
 };
@@ -57,8 +58,14 @@ export class MainBridgeAnswerService implements AnswerService {
       }
     };
 
-    const cleanupChunk = answerApi.onChunk((payload: { questionId: string; accumulatedText: string }) => {
-      if (payload.questionId === request.questionId) {
+    const isMatch = (payload: { questionId: string; turnId?: string }) => {
+      if (payload.questionId !== request.questionId) return false;
+      if (request.turnId && payload.turnId && payload.turnId !== request.turnId) return false;
+      return true;
+    };
+
+    const cleanupChunk = answerApi.onChunk((payload: { questionId: string; turnId?: string; accumulatedText: string }) => {
+      if (isMatch(payload)) {
         if (firstRendererChunkReceivedAt === undefined) {
           firstRendererChunkReceivedAt = Date.now();
           AnswerTraceLogger.record(request.questionId, {
@@ -69,8 +76,8 @@ export class MainBridgeAnswerService implements AnswerService {
       }
     });
 
-    const cleanupComplete = answerApi.onComplete((payload: { questionId: string; answer: unknown }) => {
-      if (payload.questionId === request.questionId) {
+    const cleanupComplete = answerApi.onComplete((payload: { questionId: string; turnId?: string; answer: unknown }) => {
+      if (isMatch(payload)) {
         const finalAns = payload.answer as SuggestedAnswer;
         pushDelta({ type: "finalAnswer", answer: finalAns });
         resolveCompleted(finalAns);
@@ -82,8 +89,8 @@ export class MainBridgeAnswerService implements AnswerService {
       }
     });
 
-    const cleanupError = answerApi.onError((payload: { questionId: string; error: string }) => {
-      if (payload.questionId === request.questionId) {
+    const cleanupError = answerApi.onError((payload: { questionId: string; turnId?: string; error: string }) => {
+      if (isMatch(payload)) {
         rejectError(new Error(payload.error));
         if (notifyNext) {
           const cb = notifyNext;
@@ -104,6 +111,7 @@ export class MainBridgeAnswerService implements AnswerService {
     try {
       void answerApi.generateAnswer({
         questionId: request.questionId,
+        turnId: request.turnId,
         question: request.question,
         rawTranscript: request.rawTranscript,
         questionCommittedAt: request.questionCommittedAt,

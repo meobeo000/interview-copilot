@@ -11,10 +11,15 @@ import { isSpeculativeEnabled } from "../../question-detector/speculativeConfig"
 import { SpeculativePrewarmPolicy, type PrewarmEligibilityResult } from "../../question-detector/speculativePrewarmPolicy";
 import type { SemanticEvidenceState } from "../../question-detector/semanticEvidence";
 import { capHistory } from "../../shared/history";
+import { createCommittedTurn } from "../../question-detector/committedTurn";
 import {
   calculatePipelineMetrics,
   extractFirstUsefulAnswer,
   formatPipelineMetricsLog,
+  logTurnCreated,
+  logTurnCommitted,
+  logManualAnswerRequested,
+  logAnswerAttachedToTurn,
   type PipelineTimestamps
 } from "../../shared/telemetry";
 import type { AppStatus, ConversationItem, StreamController, SuggestedAnswer } from "../../shared/types";
@@ -143,6 +148,7 @@ export interface CopilotState {
   updateProfile: (profile: CandidateProfile) => void;
   toggleContentProtection: () => Promise<void>;
   regenerateAnswer: () => Promise<void>;
+  generateAnswerForTurn: (turnId: string) => Promise<void>;
   triggerDirectQuestion: (questionText: string) => Promise<void>;
   triggerDevDirectQuestion: (questionText?: string) => Promise<void>;
   hideOverlay: () => Promise<void>;
@@ -522,6 +528,7 @@ function startSpeculativePrewarmStream(
     try {
       const generator = answerService.streamAnswer({
         questionId: requestId,
+        turnId: session.turnId,
         question: session.normalizedQuestion,
         rawTranscript: session.rawTranscript,
         questionCommittedAt: startedAt,
@@ -630,7 +637,7 @@ function commitQuestion(
   const rawText = rawTurnSpeechBuffer.trim() || correctedText;
   const evidenceSnapshot = snapshotSemanticEvidence(smartDetector.getEvidenceState());
   const finalIntent = smartDetector.detectIntent(correctedText, rawText);
-  const finalTurnId = evidenceSnapshot.turnId;
+  const finalTurnId = evidenceSnapshot.turnId || crypto.randomUUID();
   const speechEndedAt = providerSpeechEndedAt ?? turnSpeechEndedAt;
   const speechLastActivityAt = turnSpeechLastActivityAt;
   const lastSttPartialAt = turnLastSttPartialAt;
@@ -649,6 +656,34 @@ function commitQuestion(
   if (followUpContext.contextResolved && followUpContext.inheritedIntent) {
     finalIntent.category = followUpContext.inheritedIntent;
   }
+
+  const committedTurn = createCommittedTurn({
+    turnId: finalTurnId,
+    questionText: correctedText,
+    rawTranscript: rawText,
+    committedAt: commitTime,
+    intent: finalIntent.category,
+    entities: evidenceSnapshot.seoEntities,
+    numericFacts: evidenceSnapshot.numbers.map(String),
+    scenarioConstraints: evidenceSnapshot.scenarioConstraints,
+    parentTurnId: followUpContext.previousTurnId,
+    followUpContext
+  });
+
+  turnContextManager.recordCommittedTurn(committedTurn);
+  logTurnCreated({
+    turnId: committedTurn.turnId,
+    timestamp: committedTurn.committedAt,
+    hash: committedTurn.hash
+  });
+  logTurnCommitted({
+    turnId: committedTurn.turnId,
+    questionText: committedTurn.questionText,
+    intent: committedTurn.intent,
+    questionShape: committedTurn.questionShape,
+    hash: committedTurn.hash,
+    parentTurnId: committedTurn.parentTurnId
+  });
 
   const finalContract = buildAnswerContract({
     question: correctedText,
@@ -725,6 +760,7 @@ function commitQuestion(
 
     const newItem: ConversationItem = {
       id: spec.requestId,
+      turnId: finalTurnId,
       startedAt: spec.startedAt,
       rawTranscript: rawText,
       correctedTranscript: correctedText,
@@ -801,6 +837,7 @@ function commitQuestion(
 
   const newItem: ConversationItem = {
     id: crypto.randomUUID(),
+    turnId: finalTurnId,
     startedAt: commitTime,
     rawTranscript: rawText,
     correctedTranscript: correctedText,
@@ -837,6 +874,15 @@ function finalizeCommittedItem(
   get: () => CopilotState
 ) {
   const completedAt = Date.now();
+  const targetTurnId = item.turnId || item.id;
+
+  logAnswerAttachedToTurn({
+    turnId: targetTurnId,
+    requestId: item.id,
+    attachedTurnId: targetTurnId,
+    match: true
+  });
+
   if (item.timestamps) {
     item.timestamps.answerCompletedAt = completedAt;
     if (item.timestamps.firstUsefulAnswerAt === undefined) {
@@ -861,7 +907,7 @@ function finalizeCommittedItem(
   );
 
   const completedTurnContext: InterviewTurnContext = {
-    turnId: item.id,
+    turnId: targetTurnId,
     question: item.cleanedQuestion ?? item.rawTranscript,
     intent: intentCat,
     answerType: contract?.answerType,
@@ -879,6 +925,7 @@ function finalizeCommittedItem(
 
   const finishedItem: ConversationItem = {
     ...item,
+    turnId: targetTurnId,
     completedAt,
     answer: finalAnswer,
     timestamps: item.timestamps
@@ -887,14 +934,14 @@ function finalizeCommittedItem(
   // Deduplication: Avoid duplicate history items
   const existingHistory = get().history;
   const isDuplicate = existingHistory.some(
-    (h) => h.id === finishedItem.id || (h.rawTranscript === finishedItem.rawTranscript && Math.abs(h.startedAt - finishedItem.startedAt) < 3000)
+    (h) => h.id === finishedItem.id || h.turnId === finishedItem.turnId || (h.rawTranscript === finishedItem.rawTranscript && Math.abs(h.startedAt - finishedItem.startedAt) < 3000)
   );
 
   let history = existingHistory;
   if (!isDuplicate) {
     history = [finishedItem, ...existingHistory];
   } else {
-    history = existingHistory.map((h) => (h.id === finishedItem.id ? finishedItem : h));
+    history = existingHistory.map((h) => (h.id === finishedItem.id || (finishedItem.turnId && h.turnId === finishedItem.turnId) ? finishedItem : h));
   }
 
   writeHistory(capHistory(history));
@@ -946,6 +993,7 @@ async function streamAnswerForItem(
   try {
     const generator = answerService.streamAnswer({
       questionId: item.id,
+      turnId: item.turnId,
       question: item.cleanedQuestion ?? item.rawTranscript,
       rawTranscript: item.rawTranscript,
       questionCommittedAt: item.timestamps?.questionCommittedAt ?? item.startedAt,
@@ -1177,11 +1225,15 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     set({ status: "Idle", audioLevel: 0, intentCandidate: undefined });
   },
   finalizeQuestionNow: () => {
-    const text = get().liveTranscript.trim();
-    if (!text) {
+    const liveText = get().liveTranscript.trim();
+    if (liveText) {
+      commitQuestion(liveText, set, get);
       return;
     }
-    commitQuestion(text, set, get);
+    const targetTurnId = activeItem?.turnId || activeItem?.id || get().history[0]?.turnId || get().history[0]?.id;
+    if (targetTurnId) {
+      void generateAnswerForTurn(targetTurnId, set, get);
+    }
   },
   toggleHistoryDrawer: () => set((state) => ({ isHistoryOpen: !state.isHistoryOpen })),
   setHistoryOpen: (open: boolean) => set({ isHistoryOpen: open }),
@@ -1197,15 +1249,15 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     }
     set({ isContentProtected: nextState });
   },
+  generateAnswerForTurn: async (turnId: string) => {
+    await generateAnswerForTurn(turnId, set, get);
+  },
   regenerateAnswer: async () => {
-    const question = activeItem || get().history[0];
-    if (!question?.cleanedQuestion) {
+    const activeTurnId = activeItem?.turnId || activeItem?.id || get().history[0]?.turnId || get().history[0]?.id;
+    if (!activeTurnId) {
       return;
     }
-    clearGraceWindow();
-    abortActiveSpeculative();
-    set({ answer: emptyAnswer(), error: undefined });
-    await streamAnswerForItem(question, set, get);
+    await generateAnswerForTurn(activeTurnId, set, get);
   },
   triggerDirectQuestion: async (questionText: string) => {
     clearGraceWindow();
@@ -1218,12 +1270,44 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     const correctedText = correctionResult.correctedText;
     const finalIntent = smartDetector.detectIntent(correctedText, rawText);
     const commitTime = Date.now();
+    const finalTurnId = crypto.randomUUID();
 
     const previousContext = turnContextManager.getPreviousCompletedContext();
     const followUpContext = resolveFollowUpContext(
       correctedText,
-      previousContext
+      previousContext,
+      finalTurnId
     );
+
+    if (followUpContext.contextResolved && followUpContext.inheritedIntent) {
+      finalIntent.category = followUpContext.inheritedIntent;
+    }
+
+    const committedTurn = createCommittedTurn({
+      turnId: finalTurnId,
+      questionText: correctedText,
+      rawTranscript: rawText,
+      committedAt: commitTime,
+      intent: finalIntent.category,
+      parentTurnId: followUpContext.previousTurnId,
+      followUpContext
+    });
+
+    turnContextManager.recordCommittedTurn(committedTurn);
+    logTurnCreated({
+      turnId: committedTurn.turnId,
+      timestamp: committedTurn.committedAt,
+      hash: committedTurn.hash
+    });
+    logTurnCommitted({
+      turnId: committedTurn.turnId,
+      questionText: committedTurn.questionText,
+      intent: committedTurn.intent,
+      questionShape: committedTurn.questionShape,
+      hash: committedTurn.hash,
+      parentTurnId: committedTurn.parentTurnId
+    });
+
     const contract = buildAnswerContract({
       question: correctedText,
       intent: finalIntent,
@@ -1233,6 +1317,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
 
     const newItem: ConversationItem = {
       id: crypto.randomUUID(),
+      turnId: finalTurnId,
       startedAt: commitTime,
       rawTranscript: rawText,
       correctedTranscript: correctedText,
@@ -1270,12 +1355,44 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     const correctedText = correctionResult.correctedText;
     const finalIntent = smartDetector.detectIntent(correctedText, rawText);
     const commitTime = Date.now();
+    const finalTurnId = crypto.randomUUID();
 
     const previousContext = turnContextManager.getPreviousCompletedContext();
     const followUpContext = resolveFollowUpContext(
       correctedText,
-      previousContext
+      previousContext,
+      finalTurnId
     );
+
+    if (followUpContext.contextResolved && followUpContext.inheritedIntent) {
+      finalIntent.category = followUpContext.inheritedIntent;
+    }
+
+    const committedTurn = createCommittedTurn({
+      turnId: finalTurnId,
+      questionText: correctedText,
+      rawTranscript: rawText,
+      committedAt: commitTime,
+      intent: finalIntent.category,
+      parentTurnId: followUpContext.previousTurnId,
+      followUpContext
+    });
+
+    turnContextManager.recordCommittedTurn(committedTurn);
+    logTurnCreated({
+      turnId: committedTurn.turnId,
+      timestamp: committedTurn.committedAt,
+      hash: committedTurn.hash
+    });
+    logTurnCommitted({
+      turnId: committedTurn.turnId,
+      questionText: committedTurn.questionText,
+      intent: committedTurn.intent,
+      questionShape: committedTurn.questionShape,
+      hash: committedTurn.hash,
+      parentTurnId: committedTurn.parentTurnId
+    });
+
     const contract = buildAnswerContract({
       question: correctedText,
       intent: finalIntent,
@@ -1285,6 +1402,7 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
 
     const newItem: ConversationItem = {
       id: crypto.randomUUID(),
+      turnId: finalTurnId,
       startedAt: commitTime,
       rawTranscript: rawText,
       correctedTranscript: correctedText,
@@ -1317,3 +1435,91 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     }
   }
 }));
+
+export async function generateAnswerForTurn(
+  turnId: string,
+  set: (partial: Partial<CopilotState> | ((state: CopilotState) => Partial<CopilotState>)) => void,
+  get: () => CopilotState
+): Promise<void> {
+  let turn = turnContextManager.getCommittedTurn(turnId);
+  if (!turn) {
+    const hist = get().history.find((h) => h.id === turnId || h.turnId === turnId);
+    if (hist) {
+      turn = createCommittedTurn({
+        turnId: hist.turnId || hist.id,
+        questionText: hist.cleanedQuestion || hist.rawTranscript,
+        rawTranscript: hist.rawTranscript,
+        committedAt: hist.startedAt,
+        intent: (typeof hist.intent === "string" ? hist.intent : hist.intent?.category || "UNKNOWN") as QuestionIntentCategory,
+        parentTurnId: hist.followUpContext?.previousTurnId,
+        followUpContext: hist.followUpContext
+      });
+      turnContextManager.recordCommittedTurn(turn);
+    }
+  }
+
+  if (!turn) {
+    console.error(`[MANUAL ANSWER ERROR] No committed turn found for turnId: ${turnId}`);
+    return;
+  }
+
+  clearGraceWindow();
+  abortActiveSpeculative();
+
+  const requestId = crypto.randomUUID();
+  const requestTime = Date.now();
+
+  logManualAnswerRequested({
+    turnId: turn.turnId,
+    requestId,
+    requestedAt: requestTime,
+    questionHash: turn.hash
+  });
+
+  const intentObj: QuestionIntent = {
+    category: turn.intent,
+    confidence: 1.0,
+    normalizedQuestion: turn.questionText,
+    evidence: [...turn.entities]
+  };
+
+  const contract = buildAnswerContract({
+    question: turn.questionText,
+    intent: intentObj,
+    candidateProfile: get().candidateProfile,
+    followUpContext: turn.followUpContext
+  });
+
+  const newItem: ConversationItem = {
+    id: requestId,
+    turnId: turn.turnId,
+    startedAt: requestTime,
+    rawTranscript: turn.rawTranscript,
+    correctedTranscript: turn.questionText,
+    cleanedQuestion: turn.questionText,
+    detectedTopic:
+      turn.followUpContext?.contextResolved && turn.followUpContext.inheritedIntent
+        ? turn.followUpContext.inheritedIntent
+        : turn.intent !== "UNKNOWN"
+        ? turn.intent
+        : "Vietnamese SEO Question",
+    intent: intentObj,
+    contract,
+    followUpContext: turn.followUpContext,
+    answerProvider: answerService.providerName,
+    answerModel: answerService.modelName,
+    timestamps: {
+      speechLastActivityAt: turn.committedAt,
+      speechEndedAt: turn.committedAt,
+      questionIntentReadyAt: turn.committedAt,
+      questionCommittedAt: turn.committedAt,
+      answerRequestStartedAt: requestTime,
+      mode: "normalCommitted"
+    }
+  };
+
+  activeItem = newItem;
+  set({ answer: emptyAnswer(), error: undefined });
+  await streamAnswerForItem(newItem, set, get);
+}
+

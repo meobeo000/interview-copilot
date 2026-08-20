@@ -60,6 +60,7 @@ export class AnswerMainService {
           }
           window.webContents.send("answer:chunk", {
             questionId: request.questionId,
+            turnId: request.turnId,
             accumulatedText: delta.accumulatedText
           });
         } else if (delta.type === "finalAnswer") {
@@ -90,6 +91,7 @@ export class AnswerMainService {
 
         window.webContents.send("answer:complete", {
           questionId: request.questionId,
+          turnId: request.turnId,
           answer: payloadAnswer
         });
       }
@@ -138,6 +140,7 @@ export class AnswerMainService {
 
           window.webContents.send("answer:complete", {
             questionId: request.questionId,
+            turnId: request.turnId,
             answer: payloadAnswer
           });
         } else {
@@ -154,6 +157,7 @@ export class AnswerMainService {
 
           window.webContents.send("answer:complete", {
             questionId: request.questionId,
+            turnId: request.turnId,
             answer: payloadAnswer
           });
         }

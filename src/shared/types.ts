@@ -13,6 +13,7 @@ export type AppStatus =
 
 export interface ConversationItem {
   id: string;
+  turnId?: string;
   startedAt: number;
   completedAt?: number;
   rawTranscript: string;

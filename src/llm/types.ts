@@ -13,6 +13,7 @@ export type AnswerDelta =
 
 export interface AnswerRequest {
   questionId: string;
+  turnId?: string;
   question: string;
   rawTranscript: string;
   questionCommittedAt?: number;
